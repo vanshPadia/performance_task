@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Template to create ECR repository with basic configuration and export attributes"
+
+Parameters:
+  environment:
+    Description: Environment type
+    Type: String
+    AllowedValues:
+      - dev
+    Default: dev
+
+  service:
+    Type: String
+    Description: The service name
+    Default: ecr
+
+Resources:
+  repository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${environment}-${service}
+      ImageTagMutability: MUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 3 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 3
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${service}
+
+Outputs:
+  repository:
+    Description: A reference to the created ECR repository
+    Value: !Ref repository
+    Export:
+      Name: !Sub "${environment}-${service}"
+
+  repositoryUri:
+    Description: URI of the created ECR repository
+    Value: !GetAtt repository.RepositoryUri
+    Export:
+      Name: !Sub "${environment}-${service}-uri"
+
+  repositoryArn:
+    Description: ARN of the created ECR repository
+    Value: !GetAtt repository.Arn
+    Export:
+      Name: !Sub "${environment}-${service}-arn"

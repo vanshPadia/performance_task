@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CloudFormation template to create an Auto Scaling Group with Docker deployment from ECR
+
+Parameters:
+  environment:
+    Description: Environment type
+    Type: String
+    AllowedValues:
+      - dev
+      - stage
+      - prod
+    Default: dev
+
+  product:
+    Description: name of the product or part of the project
+    Type: String
+    Default: impressico
+
+  service:
+    Description: Name of the Service
+    Type: String
+    Default: autoScaling
+
+  keyName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Type: String
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+
+  dockerContainerPort:
+    Description: Port that the Docker container exposes
+    Type: Number
+    Default: 3000
+
+  dockerHostPort:
+    Description: Port on host to map to container port
+    Type: Number
+    Default: 3000
+
+Mappings:
+  envToInstance:
+    dev:
+      InstanceType: t3.micro
+      MinSize: 1
+      MaxSize: 2
+      DesiredCapacity: 1
+    stage:
+      InstanceType: t3.micro
+      MinSize: 1
+      MaxSize: 2
+      DesiredCapacity: 1
+    prod:
+      InstanceType: t3.micro
+      MinSize: 1
+      MaxSize: 2
+      DesiredCapacity: 1
+
+Resources:
+  autoScalingSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Auto Scaling Group instances
+      VpcId:
+        Fn::ImportValue: !Sub: "${environment}-${product}-vpc"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref dockerHostPort
+          ToPort: !Ref dockerHostPort
+          SourceSecurityGroupId:
+            Fn::ImportValue: !Sub "${environment}-alb-securityGroup"
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Fn::ImportValue: !Sub "${environment}-${product}-vpcCidir"
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-asg-securityGroup
+
+  launchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub ${environment}-${product}-launch-template
+      LaunchTemplateData:
+        ImageId: ami-0388e3ada3d9812da
+        InstanceType: !FindInMap [envToInstance, !Ref environment, InstanceType]
+        KeyName: !Ref keyName
+        IamInstanceProfile:
+          Arn:
+            Fn::ImportValue: !Sub "${environment}-${product}-ec2-instance-profile-arn"
+        SecurityGroupIds:
+          - !Ref autoScalingSecurityGroup
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub ${environment}-${product}-asg-instance
+        UserData:
+          Fn::Base64: !Sub
+            - |
+              #!/bin/bash
+              set -e
+
+              # Update system and install Docker
+              apt update -y
+              apt install -y docker.io awscli 
+
+              # Start Docker service
+              systemctl start docker
+              systemctl enable docker
+
+              # Add ec2-user/ubuntu to docker group
+              usermod -aG docker ubuntu
+
+  autoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub ${environment}-${product}-asg
+      LaunchTemplate:
+        LaunchTemplateId: !Ref launchTemplate
+        Version: !GetAtt launchTemplate.LatestVersionNumber
+      MinSize: !FindInMap [envToInstance, !Ref environment, MinSize]
+      MaxSize: !FindInMap [envToInstance, !Ref environment, MaxSize]
+      DesiredCapacity:
+        !FindInMap [envToInstance, !Ref environment, DesiredCapacity]
+      VPCZoneIdentifier:
+        - Fn::ImportValue: !Sub "${environment}-${product}-privateSubnet1"
+        - Fn::ImportValue: !Sub "${environment}-${product}-privateSubnet2"
+      TargetGroupARNs:
+        - Fn::ImportValue: !Sub "${environment}-${product}-target-group-arn"
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-asg
+          PropagateAtLaunch: true
+
+  asgTerminationLifecycleHook:
+    Type: AWS::AutoScaling::LifecycleHook
+    Properties:
+      AutoScalingGroupName: !Ref autoScalingGroup
+      LifecycleHookName: !Sub ${environment}-${product}-termination-hook
+      LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
+      HeartbeatTimeout: 300
+      DefaultResult: CONTINUE
+
+  scaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref autoScalingGroup
+      PolicyType: SimpleScaling
+      AdjustmentType: ChangeInCapacity
+      ScalingAdjustment: 1
+      Cooldown: 300
+
+  scaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref autoScalingGroup
+      PolicyType: SimpleScaling
+      AdjustmentType: ChangeInCapacity
+      ScalingAdjustment: -1
+      Cooldown: 300
+
+  cpuUp70Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${environment}-${product}-cpuUp70
+      AlarmDescription: Trigger scale up when CPU > 70%
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref autoScalingGroup
+      AlarmActions:
+        - !Ref scaleUpPolicy
+
+  cpuLower30Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${environment}-${product}-cpuLower30
+      AlarmDescription: Trigger scale down when CPU <= 30%
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 30
+      ComparisonOperator: LessThanOrEqualToThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref autoScalingGroup
+      AlarmActions:
+        - !Ref scaleDownPolicy
+
+Outputs:
+  autoScalingGroupName:
+    Description: The Auto Scaling Group Name
+    Value: !Ref autoScalingGroup
+    Export:
+      Name: !Sub "${environment}-${product}-asg"
+
+  autoScalingSecurityGroupId:
+    Description: The Security Group ID for the Auto Scaling Group
+    Value: !Ref autoScalingSecurityGroup
+    Export:
+      Name: !Sub "${environment}-${product}-asg-securityGroup"
+
+  launchTemplateId:
+    Description: The Launch Template ID
+    Value: !Ref launchTemplate
+    Export:
+      Name: !Sub "${environment}-${product}-launch-template"

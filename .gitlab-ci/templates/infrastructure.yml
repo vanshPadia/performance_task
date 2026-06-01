@@ -1,0 +1,18 @@
+variables:
+
+# ROLE_ARN: "arn:aws:iam::AccountId:role/gitlab-ci"
+
+include:
+  - local: ".gitlab-ci/templates/awscli.yml"
+
+infra_deploy_job:
+  stage: infra-deploy
+  extends: .assume_role
+  image:
+    name: amazon/aws-cli:2.34.18
+    entrypoint: [""]
+  script:
+    - ./.gitlab-ci/scripts/infradeploy.sh
+  rules:
+    # Run if explicitly requested or if running both
+    - if: '$PIPELINE_TYPE == "infra" || $PIPELINE_TYPE == "both"'

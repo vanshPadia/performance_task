@@ -1,0 +1,9 @@
+apiVersion: 1
+providers:
+  - name: "EC2 Monitoring"
+    folder: "AWS Dashboards"
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

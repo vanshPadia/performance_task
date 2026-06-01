@@ -1,0 +1,91 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: IAM roles and policies for EC2 instances to access ECR and SSM
+
+Parameters:
+  environment:
+    Description: Environment type
+    Type: String
+    AllowedValues:
+      - dev
+      - stage
+      - prod
+    Default: dev
+
+  product:
+    Description: name of the product or part of the project
+    Type: String
+    Default: impressico
+
+  service:
+    Description: Name of the Service
+    Type: String
+    Default: iam
+
+Resources:
+  ec2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${environment}-${product}-ec2-instance-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: ECRAccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:DescribeRepositories
+                  - ecr:ListImages
+                Resource: "*"
+        - PolicyName: SSMParameterAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*"
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-ec2-instance-role
+
+  ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub ${environment}-${product}-ec2-instance-profile
+      Roles:
+        - !Ref ec2InstanceRole
+
+Outputs:
+  ec2InstanceRoleArn:
+    Description: ARN of the EC2 Instance Role
+    Value: !GetAtt ec2InstanceRole.Arn
+    Export:
+      Name: !Sub "${environment}-${product}-ec2-instance-role-arn"
+
+  ec2InstanceProfileArn:
+    Description: ARN of the EC2 Instance Profile
+    Value: !GetAtt ec2InstanceProfile.Arn
+    Export:
+      Name: !Sub "${environment}-${product}-ec2-instance-profile-arn"
+
+  ec2InstanceProfileName:
+    Description: Name of the EC2 Instance Profile
+    Value: !Ref ec2InstanceProfile
+    Export:
+      Name: !Sub "${environment}-${product}-ec2-instance-profile"

@@ -1,0 +1,43 @@
+schemaVersion: "2.2"
+description: "Deploy container from ECR to EC2 instance"
+parameters:
+  application:
+    type: String
+    description: "Name of the application service (frontend, backend, or all)"
+    options:
+      - backend
+      - frontend
+      - both
+  imagename:
+    type: String
+    description: "ECR repository URL (without tag)"
+  imagetag:
+    type: String
+    description: "Image tag to deploy"
+    default: "latest"
+mainSteps:
+  - action: aws:runShellScript
+    name: DeployContainer
+    inputs:
+      runCommand:
+        - "#!/bin/bash"
+        - "set -e"
+        - "echo 'Logging into AWS ECR...'"
+        - "REGISTRY_URL=$(echo '{{imagename}}' | cut -d'/' -f1)"
+        - "aws ecr get-login-password --region ${AWS_DEFAULT_REGION:-us-east-1} | docker login --username AWS --password-stdin $REGISTRY_URL"
+        - "echo 'Pulling target image...'"
+        - "docker pull {{imagename}}:{{imagetag}}"
+        - "echo 'Preparing target services...'"
+        - "if [ '{{application}}' = 'both' ]; then"
+        - "  echo 'Deploying all services using docker-compose...'"
+        - "  docker compose down --remove-orphans"
+        - "  docker compose up -d --build"
+        - "else"
+        - "  echo 'Deploying specific service: {{application}}'"
+        - "  docker compose stop {{application}} || true"
+        - "  docker compose rm -f {{application}} || true"
+        - "  docker compose up -d --build {{application}}"
+        - "fi"
+        - "sleep 5"
+        - "docker ps"
+        - "echo 'Deployment completed successfully!'"

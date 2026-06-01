@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CloudFormation template to create an Application Load Balancer
+
+Parameters:
+  environment:
+    Description: Environment type
+    Type: String
+    AllowedValues:
+      - dev
+    Default: dev
+
+Resources:
+  loadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Application Load Balancer
+      VpcId: !ImportValue vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-alb-securityGroup
+
+  applicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${environment}-alb
+      Type: application
+      Scheme: internet-facing
+      Subnets:
+        - !ImportValue publicSubnet1
+        - !ImportValue publicSubnet2
+      SecurityGroups:
+        - !Ref loadBalancerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-alb
+
+  targetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${environment}-target-group
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      VpcId: !ImportValue vpc
+      Targets:
+        - Id: !ImportValue
+            "Fn::Sub": "${environment}-instance"
+          Port: 80
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-target-group
+
+  albListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref targetGroup
+      LoadBalancerArn: !Ref applicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+Outputs:
+  loadBalancerId:
+    Description: The Load Balancer ID
+    Value: !Ref applicationLoadBalancer
+    Export:
+      Name: !Sub "${environment}-alb"
+
+  loadBalancerDNS:
+    Description: The DNS name of the Load Balancer
+    Value: !GetAtt applicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub "${environment}-alb-dns"
+
+  targetGroupArn:
+    Description: The ARN of the Target Group
+    Value: !Ref targetGroup
+    Export:
+      Name: !Sub "${environment}-target-group-arn"
+
+  loadBalancerSecurityGroupId:
+    Description: The Security Group ID for the Load Balancer
+    Value: !Ref loadBalancerSecurityGroup
+    Export:
+      Name: !Sub "${environment}-alb-securityGroup"
+  LoadBalancerFullName:
+     Value: !GetAtt applicationLoadBalancer.LoadBalancerFullName
+     Export:
+       Name: dev-alb-full-name
+  TargetGroupFullName:
+     Value: !GetAtt targetGroup.TargetGroupFullName
+     Export:
+       Name: dev-tg-full-name

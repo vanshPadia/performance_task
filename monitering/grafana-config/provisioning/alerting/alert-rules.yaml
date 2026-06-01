@@ -1,0 +1,61 @@
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: cpu metrics
+    folder: cpu
+    interval: 1m
+    rules:
+      - uid: awscpuec2alert
+        title: aws ec2 alert
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: cloudwatch-ds
+            model:
+              dimensions:
+                InstanceId: i
+              metricName: CPUUtilization
+              metricQueryType: 0
+              namespace: AWS/EC2
+              period: "300"
+              queryLanguage: CWLI
+              queryMode: Metrics
+              refId: A
+              region: default
+              statistic: Average
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              expression: A
+              reducer: last
+              type: reduce
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              expression: B
+              conditions:
+                - evaluator:
+                    params:
+                      - 80
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params:
+                      - B
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              type: threshold
+              refId: C
+        noDataState: NoData
+        execErrState: Error
+        for: 1m
+        isPaused: false
+        notification_settings:
+          receiver: slack

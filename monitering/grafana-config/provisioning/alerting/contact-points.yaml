@@ -1,0 +1,10 @@
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: slack
+    receivers:
+      - uid: awsslackcontact
+        type: slack
+        settings:
+          url: ${url}
+        disableResolveMessage: false

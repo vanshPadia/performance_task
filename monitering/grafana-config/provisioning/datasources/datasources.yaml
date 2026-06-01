@@ -1,0 +1,9 @@
+apiVersion: 1
+datasources:
+  - name: CloudWatch
+    type: cloudwatch
+    uid: cloudwatch-ds
+    access: proxy
+    jsonData:
+      authType: default
+      defaultRegion: ap-south-1 # Change this if needed

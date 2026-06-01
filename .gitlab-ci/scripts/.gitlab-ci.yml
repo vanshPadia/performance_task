@@ -1,0 +1,30 @@
+include:
+  - local: ".gitlab-ci/templates/infrastructure.yml"
+  - local: ".gitlab-ci/templates/application.yml"
+
+variables:
+  # ROLE_ARN: "arn:aws:iam::AccountId:role/gitlab-ci"
+  PIPELINE_TYPE:
+    value: "app"
+    options:
+      - "app"
+      - "infra"
+      - "both"
+    description: "Select which pipeline flow to execute"
+  APPLICATION_CHOICE:
+    value: "frontend"
+    options:
+      - "frontend"
+      - "backend"
+      - "both"
+    description: "Select which application part to build/deploy (Applies only for 'app' or 'both' pipelines)"
+
+workflow:
+  rules:
+    # Only execute if triggered manually via Web UI
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+stages:
+  - infra-deploy
+  - app-build
+  - app-deploy

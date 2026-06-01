@@ -1,0 +1,66 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: SSM Document for deploying containers from ECR (Simplified)
+
+Parameters:
+  environment:
+    Description: Environment type
+    Type: String
+    AllowedValues:
+      - dev
+    Default: dev
+
+Resources:
+  deployContainerDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Command
+      DocumentFormat: JSON
+      Name: !Sub ${environment}-container-document
+      Content:
+        schemaVersion: "2.2"
+        description: "Deploy container from ECR to EC2 instance"
+        parameters:
+          imagename:
+            type: String
+            description: "ECR repository URL (without tag)"
+          imagetag:
+            type: String
+            description: "Image tag to deploy"
+            default: "latest"
+        mainSteps:
+          - action: aws:runShellScript
+            name: DeployContainer
+            inputs:
+              runCommand:
+                - "#!/bin/bash"
+                - "set -e"
+                - ""
+                - "ECR_REPO={{ imagename }}"
+                - "TAG={{ imagetag }}"
+                - 'CONTAINER_NAME="backend-container"'
+                - 'FULL_IMAGE="${ECR_REPO}:${TAG}"'
+                - ""
+                - 'echo "Deploying ${APP_NAME} using image: ${FULL_IMAGE}"'
+                - ""
+                - "REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)"
+                - ""
+                - "aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${ECR_REPO%%/*}"
+                - ""
+                - "docker pull ${FULL_IMAGE}"
+                - ""
+                - "docker stop ${CONTAINER_NAME} 2>/dev/null || true"
+                - "docker rm ${CONTAINER_NAME} 2>/dev/null || true"
+                - ""
+                - "docker run -d --name ${CONTAINER_NAME} -p 80:80 --restart unless-stopped ${FULL_IMAGE}"
+                - ""
+                - "sleep 5"
+                - "docker ps -f name=${CONTAINER_NAME} || { docker logs ${CONTAINER_NAME}; exit 1; }"
+                - ""
+                - 'echo "Deployment completed successfully"'
+
+Outputs:
+  documentName:
+    Description: SSM Document Name
+    Value: !Ref deployContainerDocument
+    Export:
+      Name: !Sub ${environment}-container-document

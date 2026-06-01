@@ -3,8 +3,10 @@ contactPoints:
   - orgId: 1
     name: slack
     receivers:
-      - uid: awsslackcontact
+      - uid: slack-contact
         type: slack
         settings:
-          url: ${url}
+          url: ${SLACK_WEBHOOK_URL} # read from .env file
+          title: "Grafana Alert"
+          text: "{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}"
         disableResolveMessage: false

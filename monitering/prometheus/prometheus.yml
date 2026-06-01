@@ -1,0 +1,34 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus scrapes itself
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Auto-discover ASG app EC2s by tag name
+  # When a new EC2 comes up with this tag, Prometheus finds it in ~15s automatically
+  - job_name: "ec2-app-instances"
+    ec2_sd_configs:
+      - region: ap-south-1
+        port: 9100 # node_exporter port on app EC2s
+        filters:
+          - name: tag:Name
+            values:
+              - dev-impressico-asg-instance # must match ASG Tag in autoScaling.yml
+          - name: instance-state-name
+            values:
+              - running
+    relabel_configs:
+      # Scrape on private IP (Grafana EC2 reaches private subnet via VPC)
+      - source_labels: [__meta_ec2_private_ip]
+        target_label: __address__
+        replacement: "${1}:9100"
+      # Keep instance ID as a label for dashboards
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance_id
+      # Keep private IP as label
+      - source_labels: [__meta_ec2_private_ip]
+        target_label: private_ip

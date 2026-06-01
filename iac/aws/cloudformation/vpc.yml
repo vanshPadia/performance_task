@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: CloudFormation template to create a VPC
+Description: CloudFormation template to create a VPC with public/private subnets and NAT Gateway
 
 Parameters:
   environment:
@@ -9,11 +9,10 @@ Parameters:
       - dev
       - stage
       - prod
-
     Default: dev
 
   product:
-    Description: name of the product or part of the project
+    Description: Name of the product or part of the project
     Type: String
     Default: impressico
 
@@ -23,17 +22,24 @@ Parameters:
     Default: vpc
 
 Resources:
+  # ── VPC ──────────────────────────────────────────────────────────────────────
   vpc:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
       Tags:
         - Key: Name
           Value: !Sub ${environment}-${product}-${service}
 
+  # ── INTERNET GATEWAY ─────────────────────────────────────────────────────────
   internetGateway:
     Type: AWS::EC2::InternetGateway
-    Properties: {}
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-igw
 
   gatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -41,70 +47,75 @@ Resources:
       VpcId: !Ref vpc
       InternetGatewayId: !Ref internetGateway
 
+  # ── SUBNETS ───────────────────────────────────────────────────────────────────
+  # Public Subnet 1 — AZ-a  (Grafana EC2 + ALB)
   publicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref vpc
-      CidrBlock: !Select
-        - 1
-        - !Cidr
-          - !GetAtt vpc.CidrBlock
-          - 5
-          - 8
+      CidrBlock: !Select [1, !Cidr [!GetAtt vpc.CidrBlock, 5, 8]]
       AvailabilityZone: !Select [0, !GetAZs ""]
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
           Value: !Sub ${environment}-${product}-publicSubnet1
 
-  privateSubnet1:
-    Type: AWS::EC2::Subnet
-    Properties:
-      VpcId: !Ref vpc
-      CidrBlock: !Select
-        - 2
-        - !Cidr
-          - !GetAtt vpc.CidrBlock
-          - 5
-          - 8
-      AvailabilityZone: !Select [1, !GetAZs ""]
-      MapPublicIpOnLaunch: false
-      Tags:
-        - Key: Name
-          Value: !Sub ${environment}-${product}-privateSubnet1
-
+  # Public Subnet 2 — AZ-b  (ALB second AZ)
   publicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref vpc
-      CidrBlock: !Select
-        - 3
-        - !Cidr
-          - !GetAtt vpc.CidrBlock
-          - 5
-          - 8
+      CidrBlock: !Select [3, !Cidr [!GetAtt vpc.CidrBlock, 5, 8]]
       AvailabilityZone: !Select [1, !GetAZs ""]
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
           Value: !Sub ${environment}-${product}-publicSubnet2
 
+  # Private Subnet 1 — AZ-a  (ASG app EC2s)
+  privateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref vpc
+      CidrBlock: !Select [2, !Cidr [!GetAtt vpc.CidrBlock, 5, 8]]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-privateSubnet1
+
+  # Private Subnet 2 — AZ-b  (ASG app EC2s)
   privateSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref vpc
-      CidrBlock: !Select
-        - 4
-        - !Cidr
-          - !GetAtt vpc.CidrBlock
-          - 5
-          - 8
-      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [4, !Cidr [!GetAtt vpc.CidrBlock, 5, 8]]
+      AvailabilityZone: !Select [1, !GetAZs ""]
       MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
           Value: !Sub ${environment}-${product}-privateSubnet2
 
+  # ── NAT GATEWAY (was MISSING — private subnets need this to reach ECR) ────────
+  natEip:
+    Type: AWS::EC2::EIP
+    DependsOn: gatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-nat-eip
+
+  natGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt natEip.AllocationId
+      SubnetId: !Ref publicSubnet1 # NAT lives in public subnet
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-natGateway
+
+  # ── PUBLIC ROUTE TABLE ────────────────────────────────────────────────────────
   publicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -115,6 +126,7 @@ Resources:
 
   publicDefaultRoute:
     Type: AWS::EC2::Route
+    DependsOn: gatewayAttachment
     Properties:
       RouteTableId: !Ref publicRouteTable
       DestinationCidrBlock: 0.0.0.0/0
@@ -132,6 +144,7 @@ Resources:
       SubnetId: !Ref publicSubnet2
       RouteTableId: !Ref publicRouteTable
 
+  # ── PRIVATE ROUTE TABLE ───────────────────────────────────────────────────────
   privateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -145,7 +158,7 @@ Resources:
     Properties:
       RouteTableId: !Ref privateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref natGateway
+      NatGatewayId: !Ref natGateway # NOW correctly references the NAT GW above
 
   privateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -161,37 +174,43 @@ Resources:
 
 Outputs:
   vpcId:
-    Description: The VPC ID of the newly created VPC
+    Description: VPC ID
     Value: !Ref vpc
     Export:
       Name: !Sub "${environment}-${product}-vpc"
 
+  vpcCidr:
+    Description: VPC CIDR block
+    Value: !GetAtt vpc.CidrBlock
+    Export:
+      Name: !Sub "${environment}-${product}-vpcCidir"
+
   publicSubnet1Id:
-    Description: The Subnet ID of the first public subnet
+    Description: Public Subnet 1 ID
     Value: !Ref publicSubnet1
     Export:
       Name: !Sub "${environment}-${product}-publicSubnet1"
 
   publicSubnet2Id:
-    Description: The Subnet ID of the second public subnet
+    Description: Public Subnet 2 ID
     Value: !Ref publicSubnet2
     Export:
       Name: !Sub "${environment}-${product}-publicSubnet2"
 
   privateSubnet1Id:
-    Description: The Subnet ID of the first private subnet
+    Description: Private Subnet 1 ID
     Value: !Ref privateSubnet1
     Export:
       Name: !Sub "${environment}-${product}-privateSubnet1"
 
   privateSubnet2Id:
-    Description: The Subnet ID of the second private subnet
+    Description: Private Subnet 2 ID
     Value: !Ref privateSubnet2
     Export:
       Name: !Sub "${environment}-${product}-privateSubnet2"
 
-  VpcCidrBlockExport:
-    Description: The VPC cidr of the newly created VPC
-    Value: !GetAtt vpc.CidrBlock
+  natGatewayId:
+    Description: NAT Gateway ID
+    Value: !Ref natGateway
     Export:
-      Name: !Sub "${environment}-${product}-vpcCidir"
+      Name: !Sub "${environment}-${product}-natGateway"

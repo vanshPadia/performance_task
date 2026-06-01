@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Public EC2 instance running Grafana + Prometheus - pulls config from repo
+
+Parameters:
+  environment:
+    Description: Environment type
+    Type: String
+    AllowedValues:
+      - dev
+      - stage
+      - prod
+    Default: dev
+
+  product:
+    Description: Name of the product or part of the project
+    Type: String
+    Default: vansh-impressico
+
+  service:
+    Description: Name of the Service
+    Type: String
+    Default: grafana
+
+  keyName:
+    Description: Name of an existing EC2 KeyPair for SSH access
+    Type: String
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+
+  repoUrl:
+    Description: Public GitLab repo URL
+    Type: String
+    Default: https://git.impressicocrm.com/pip-workspace/vansh-pip-workspace.git
+
+  slackWebhookUrl:
+    Description: Slack webhook URL for Grafana alerts
+    Type: String
+    NoEcho: true
+
+  grafanaAdminPassword:
+    Description: Grafana admin password
+    Type: String
+    NoEcho: true
+    Default: Admin@1234
+
+Mappings:
+  envToInstance:
+    dev:
+      InstanceType: t3.micro
+      ImageId: ami-0388e3ada3d9812da
+    stage:
+      InstanceType: t3.micro
+      ImageId: ami-0388e3ada3d9812da
+    prod:
+      InstanceType: t3.micro
+      ImageId: ami-0388e3ada3d9812da
+
+Resources:
+  grafanaEc2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !FindInMap [envToInstance, !Ref environment, InstanceType]
+      ImageId: !FindInMap [envToInstance, !Ref environment, ImageId]
+      SubnetId:
+        Fn::ImportValue: !Sub "${environment}-${product}-publicSubnet1"
+      IamInstanceProfile:
+        Fn::ImportValue: !Sub "${environment}-${product}-ec2-instance-profile"
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub "${environment}-${product}-grafana-sg"
+      KeyName: !Ref keyName
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-grafana
+        - Key: role
+          Value: monitoring
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -e
+            apt update -y
+            apt-get install -y docker.io docker-compose curl
+
+            systemctl start docker
+            systemctl enable docker
+            usermod -aG docker ubuntu
+
+            echo "===== Cloning repo ====="
+            git clone ${RepoUrl} /home/ubuntu/
+            cd /home/ubuntu/
+
+            echo "===== Writing .env for Grafana ====="
+            cat > /home/ubuntu/monitering/docker/.env << EOF
+            GF_SECURITY_ADMIN_PASSWORD=${GrafanaPassword}
+            SLACK_WEBHOOK_URL=${SlackUrl}
+            EOF
+
+            echo "===== Starting Grafana + Prometheus ====="
+            cd /home/ubuntu/monitering/docker
+            docker compose up -d
+
+            echo "===== Done ====="
+            PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+            echo "Grafana:    http://${!PUBLIC_IP}:3000"
+            echo "Prometheus: http://${!PUBLIC_IP}:9090"
+          - RepoUrl: !Ref repoUrl
+            GrafanaPassword: !Ref grafanaAdminPassword
+            SlackUrl: !Ref slackWebhookUrl
+
+Outputs:
+  grafanaInstanceId:
+    Description: Grafana EC2 Instance ID
+    Value: !Ref grafanaEc2Instance
+    Export:
+      Name: !Sub "${environment}-${product}-grafana-instance"
+
+  grafanaPublicIp:
+    Description: Grafana EC2 Public IP
+    Value: !GetAtt grafanaEc2Instance.PublicIp
+    Export:
+      Name: !Sub "${environment}-${product}-grafana-public-ip"
+
+  grafanaUrl:
+    Description: Grafana dashboard URL
+    Value: !Sub "http://${grafanaEc2Instance.PublicIp}:3000"
+    Export:
+      Name: !Sub "${environment}-${product}-grafana-url"

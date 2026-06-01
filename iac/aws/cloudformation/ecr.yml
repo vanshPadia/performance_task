@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "Template to create ECR repository with basic configuration and export attributes"
+Description: ECR repositories for frontend and backend Docker images
 
 Parameters:
   environment:
@@ -7,18 +7,26 @@ Parameters:
     Type: String
     AllowedValues:
       - dev
+      - stage
+      - prod
     Default: dev
 
-  service:
+  product:
+    Description: Name of the product or part of the project
     Type: String
-    Description: The service name
+    Default: impressico
+
+  service:
+    Description: Name of the Service
+    Type: String
     Default: ecr
 
 Resources:
-  repository:
+  # ── BACKEND REPO ──────────────────────────────────────────────────────────────
+  backendRepository:
     Type: AWS::ECR::Repository
     Properties:
-      RepositoryName: !Sub ${environment}-${service}
+      RepositoryName: !Sub ${environment}-${product}-backend
       ImageTagMutability: MUTABLE
       LifecyclePolicy:
         LifecyclePolicyText: |
@@ -26,11 +34,11 @@ Resources:
             "rules": [
               {
                 "rulePriority": 1,
-                "description": "Keep last 3 images",
+                "description": "Keep last 5 images",
                 "selection": {
                   "tagStatus": "any",
                   "countType": "imageCountMoreThan",
-                  "countNumber": 3
+                  "countNumber": 5
                 },
                 "action": {
                   "type": "expire"
@@ -40,23 +48,68 @@ Resources:
           }
       Tags:
         - Key: Name
-          Value: !Sub ${environment}-${service}
+          Value: !Sub ${environment}-${product}-backend
+
+  frontendRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${environment}-${product}-frontend
+      ImageTagMutability: MUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 5 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 5
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-frontend
 
 Outputs:
-  repository:
-    Description: A reference to the created ECR repository
-    Value: !Ref repository
+  backendRepositoryName:
+    Description: Backend ECR repository name
+    Value: !Ref backendRepository
     Export:
-      Name: !Sub "${environment}-${service}"
+      Name: !Sub "${environment}-${product}-backend-ecr"
 
-  repositoryUri:
-    Description: URI of the created ECR repository
-    Value: !GetAtt repository.RepositoryUri
+  backendRepositoryUri:
+    Description: Backend ECR repository URI
+    Value: !GetAtt backendRepository.RepositoryUri
     Export:
-      Name: !Sub "${environment}-${service}-uri"
+      Name: !Sub "${environment}-${product}-backend-ecr-uri"
 
-  repositoryArn:
-    Description: ARN of the created ECR repository
-    Value: !GetAtt repository.Arn
+  backendRepositoryArn:
+    Description: Backend ECR repository ARN
+    Value: !GetAtt backendRepository.Arn
     Export:
-      Name: !Sub "${environment}-${service}-arn"
+      Name: !Sub "${environment}-${product}-backend-ecr-arn"
+
+  frontendRepositoryName:
+    Description: Frontend ECR repository name
+    Value: !Ref frontendRepository
+    Export:
+      Name: !Sub "${environment}-${product}-frontend-ecr"
+
+  frontendRepositoryUri:
+    Description: Frontend ECR repository URI
+    Value: !GetAtt frontendRepository.RepositoryUri
+    Export:
+      Name: !Sub "${environment}-${product}-frontend-ecr-uri"
+
+  frontendRepositoryArn:
+    Description: Frontend ECR repository ARN
+    Value: !GetAtt frontendRepository.Arn
+    Export:
+      Name: !Sub "${environment}-${product}-frontend-ecr-arn"

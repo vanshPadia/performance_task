@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: IAM roles and policies for EC2 instances to access ECR and SSM
+Description: IAM roles and policies for EC2 instances (app) and Lambda (termination handler)
 
 Parameters:
   environment:
@@ -12,7 +12,7 @@ Parameters:
     Default: dev
 
   product:
-    Description: name of the product or part of the project
+    Description: Name of the product or part of the project
     Type: String
     Default: impressico
 
@@ -22,6 +22,9 @@ Parameters:
     Default: iam
 
 Resources:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # EC2 INSTANCE ROLE  (used by ASG app instances + Grafana EC2)
+  # ═══════════════════════════════════════════════════════════════════════════
   ec2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -34,9 +37,10 @@ Resources:
               Service: ec2.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore # SSM access (no SSH needed)
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy # CloudWatch agent
       Policies:
+        # Pull images from ECR
         - PolicyName: ECRAccessPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -50,6 +54,8 @@ Resources:
                   - ecr:DescribeRepositories
                   - ecr:ListImages
                 Resource: "*"
+
+        # Read secrets/config from SSM Parameter Store
         - PolicyName: SSMParameterAccess
           PolicyDocument:
             Version: "2012-10-17"
@@ -59,7 +65,46 @@ Resources:
                   - ssm:GetParameter
                   - ssm:GetParameters
                   - ssm:GetParametersByPath
-                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*"
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${environment}/*"
+
+        # Write logs/backups to S3 (used by Lambda SSM backup command on EC2)
+        - PolicyName: S3BackupAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${environment}-${product}-backups"
+                  - !Sub "arn:aws:s3:::${environment}-${product}-backups/*"
+
+        # Prometheus EC2 service discovery — reads instance tags to find app EC2s
+        - PolicyName: PrometheusEC2Discovery
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                Resource: "*"
+
+        # Write application logs to CloudWatch
+        - PolicyName: CloudWatchLogsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ec2/${environment}-${product}*"
+
       Tags:
         - Key: Name
           Value: !Sub ${environment}-${product}-ec2-instance-role
@@ -70,6 +115,74 @@ Resources:
       InstanceProfileName: !Sub ${environment}-${product}-ec2-instance-profile
       Roles:
         - !Ref ec2InstanceRole
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # LAMBDA EXECUTION ROLE  (termination handler)
+  # ═══════════════════════════════════════════════════════════════════════════
+  lambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${environment}-${product}-lambda-execution-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole # CloudWatch logs for Lambda
+      Policies:
+        # Send SSM run command to dying EC2 for backup
+        - PolicyName: SSMRunCommand
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                Resource: "*"
+
+        # Complete the ASG lifecycle hook (let termination proceed)
+        - PolicyName: ASGLifecycleAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:CompleteLifecycleAction
+                  - autoscaling:DescribeAutoScalingInstances
+                Resource: "*"
+
+        # Read Slack webhook URL from SSM Parameter Store
+        - PolicyName: LambdaSSMParameterAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${environment}/slack/webhook"
+
+        # Write backup archive to S3
+        - PolicyName: LambdaS3BackupAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${environment}-${product}-backups"
+                  - !Sub "arn:aws:s3:::${environment}-${product}-backups/*"
+
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-lambda-execution-role
 
 Outputs:
   ec2InstanceRoleArn:
@@ -89,3 +202,9 @@ Outputs:
     Value: !Ref ec2InstanceProfile
     Export:
       Name: !Sub "${environment}-${product}-ec2-instance-profile"
+
+  lambdaExecutionRoleArn:
+    Description: ARN of the Lambda Execution Role
+    Value: !GetAtt lambdaExecutionRole.Arn
+    Export:
+      Name: !Sub "${environment}-${product}-lambda-execution-role-arn"

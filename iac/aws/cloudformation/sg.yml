@@ -1,0 +1,148 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Security Groups for ALB, ASG app EC2s, and Grafana EC2
+
+Parameters:
+  environment:
+    Description: Environment type
+    Type: String
+    AllowedValues:
+      - dev
+      - stage
+      - prod
+    Default: dev
+
+  product:
+    Description: Name of the product or part of the project
+    Type: String
+    Default: impressico
+
+  service:
+    Description: Name of the Service
+    Type: String
+    Default: sg
+
+Resources:
+  albSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${environment}-${product}-alb-sg
+      GroupDescription: Security group for Application Load Balancer
+      VpcId:
+        Fn::ImportValue: !Sub "${environment}-${product}-vpc"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP from internet
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS from internet
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-alb-sg
+
+  appSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${environment}-${product}-app-sg
+      GroupDescription: Security group for ASG app EC2 instances
+      VpcId:
+        Fn::ImportValue: !Sub "${environment}-${product}-vpc"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref albSecurityGroup
+          Description: Frontend from ALB only
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          SourceSecurityGroupId: !Ref albSecurityGroup
+          Description: Backend API from ALB only
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref albSecurityGroup
+          Description: HTTP from ALB only
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp:
+            Fn::ImportValue: !Sub "${environment}-${product}-vpcCidir"
+          Description: SSH from within VPC only
+        - IpProtocol: tcp
+          FromPort: 9100
+          ToPort: 9100
+          SourceSecurityGroupId: !Ref grafanaSecurityGroup
+          Description: Prometheus node_exporter scrape from Grafana EC2 only
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound (ECR pull, SSM, CloudWatch)
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-app-sg
+
+  grafanaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${environment}-${product}-grafana-sg
+      GroupDescription: Security group for Grafana monitoring EC2
+      VpcId:
+        Fn::ImportValue: !Sub "${environment}-${product}-vpc"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+          Description: Grafana UI from internet
+        - IpProtocol: tcp
+          FromPort: 9090
+          ToPort: 9090
+          CidrIp:
+            Fn::ImportValue: !Sub "${environment}-${product}-vpcCidir"
+          Description: Prometheus UI from VPC only
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH for initial setup
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          ToPort: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound (scrape private EC2s on 9100, reach CloudWatch API)
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-grafana-sg
+
+Outputs:
+  albSecurityGroupId:
+    Description: ALB Security Group ID
+    Value: !Ref albSecurityGroup
+    Export:
+      Name: !Sub "${environment}-${product}-alb-sg"
+
+  appSecurityGroupId:
+    Description: App EC2 Security Group ID
+    Value: !Ref appSecurityGroup
+    Export:
+      Name: !Sub "${environment}-${product}-app-sg"
+
+  grafanaSecurityGroupId:
+    Description: Grafana EC2 Security Group ID
+    Value: !Ref grafanaSecurityGroup
+    Export:
+      Name: !Sub "${environment}-${product}-grafana-sg"

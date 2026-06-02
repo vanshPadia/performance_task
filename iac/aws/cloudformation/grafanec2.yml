@@ -78,24 +78,24 @@ Resources:
             #!/bin/bash
             set -e
             apt update -y
-            apt-get install -y docker.io docker-compose curl
+            apt install -y docker.io docker-compose curl
 
             systemctl start docker
             systemctl enable docker
             usermod -aG docker ubuntu
 
             echo "===== Cloning repo ====="
-            git clone ${RepoUrl} /home/ubuntu/
-            cd /home/ubuntu/
+            git clone ${RepoUrl} /home/ubuntu/grafana/
+            cd /home/ubuntu/grafana/monitering/
 
             echo "===== Writing .env for Grafana ====="
-            cat > /home/ubuntu/monitering/docker/.env << EOF
+            cat > /home/ubuntu/grafana/monitering/docker/.env << EOF
             GF_SECURITY_ADMIN_PASSWORD=${GrafanaPassword}
             SLACK_WEBHOOK_URL=${SlackUrl}
             EOF
 
             echo "===== Starting Grafana + Prometheus ====="
-            cd /home/ubuntu/monitering/docker
+            cd /home/ubuntu/grafana/monitering/docker
             docker compose up -d
 
             echo "===== Done ====="

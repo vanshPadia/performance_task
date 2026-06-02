@@ -28,7 +28,8 @@ services:
       retries: 5
 
   backend:
-    context: ./backend
+    build:
+      context: ./backend
     container_name: node_backend
     restart: always
     ports:
@@ -44,7 +45,8 @@ services:
         condition: service_healthy
 
   frontend:
-    context: ./frontend
+    build:
+      context: ./frontend
     container_name: react_frontend
     restart: always
     ports:

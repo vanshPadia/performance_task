@@ -28,7 +28,7 @@ services:
       retries: 5
 
   backend:
-    image: ${ECR_REGISTRY}/${ENVIRONMENT}-${PRODUCT}-backend:${IMAGE_TAG:-latest}
+    context: ./backend
     container_name: node_backend
     restart: always
     ports:
@@ -44,7 +44,7 @@ services:
         condition: service_healthy
 
   frontend:
-    image: ${ECR_REGISTRY}/${ENVIRONMENT}-${PRODUCT}-frontend:${IMAGE_TAG:-latest}
+    context: ./frontend
     container_name: react_frontend
     restart: always
     ports:

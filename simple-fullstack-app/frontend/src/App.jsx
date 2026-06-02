@@ -8,7 +8,7 @@ export default function App() {
     const [borrowed, setBorrowed] = useState([]);
     const [error, setError] = useState('');
 
-    const API_URL = process.env.VITE_API_URL
+    const API_URL = import.meta.env.VITE_API_URL;
 
     useEffect(() => {
         if (user) {

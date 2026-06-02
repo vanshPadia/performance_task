@@ -52,7 +52,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - VITE_API_URL=http://${ALB_DNS:-localhost}:5000/api
+      - VITE_API_URL=http://0.0.0.0:5000/api
     depends_on:
       - backend
 

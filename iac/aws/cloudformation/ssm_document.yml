@@ -52,7 +52,6 @@ Resources:
               runCommand:
                 - "#!/bin/bash"
                 - "set -e"
-                - "exec > /var/log/ssm-deploy.log 2>&1"
                 - ""
                 - "IMAGE_TAG='{{ imageTag }}'"
                 - "APPLICATION='{{ application }}'"
@@ -75,7 +74,7 @@ Resources:
                 - "fi"
                 - ""
                 - "echo '===== [3/5] Update .env.prod with new IMAGE_TAG ====='"
-                - "cd /opt/app/simple-fullstack-app"
+                - "cd /home/ubuntu/applications/imple-fullstack-app"
                 - "# Update or write the env file"
                 - "cat > .env.prod << EOF"
                 - "ECR_REGISTRY=${ECR_REGISTRY}"
@@ -87,9 +86,9 @@ Resources:
                 - ""
                 - "echo '===== [4/5] Redeploy with new image ====='"
                 - 'if [ "${APPLICATION}" = ''both'' ]; then'
-                - "  docker compose -f docker-compose.yml up -d --no-build"
+                - "  docker compose up -d --no-build"
                 - "else"
-                - "  docker compose -f docker-compose.yml up -d --no-build ${APPLICATION}"
+                - "  docker compose up -d --no-build ${APPLICATION}"
                 - "fi"
                 - ""
                 - "echo '===== [5/5] Verify containers running ====='"

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: SAM template for Lambda function with VPC configuration and OpenSearch integration
+Description: SAM template - Lambda termination handler + EventBridge rule in one file
 
 Parameters:
   environment:
@@ -8,100 +8,86 @@ Parameters:
     Type: String
     AllowedValues:
       - dev
+      - stage
       - prod
-      - staging
+    Default: dev
 
-  indexPattern:
+  product:
+    Description: Name of the product or part of the project
     Type: String
-    Default: "filebeat02-*"
-    Description: Index pattern for OpenSearch
+    Default: impressico
 
 Resources:
-  lambdaSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for lambda access
-      VpcId: !ImportValue vpc
-      SecurityGroupEgress:
-        - IpProtocol: -1  
-          FromPort: 0
-          ToPort: 0
-          CidrIp: 0.0.0.0/0  
-      Tags:
-        - Key: Name
-          Value: !Sub ${environment}-lambdaSecurityGroup
-
-  lambdaFunction:
+  terminationHandlerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${environment}-lambda"
+      FunctionName: !Sub "${environment}-${product}-termination-handler"
       CodeUri: ./python/
       Handler: lambda.lambda_handler
       Runtime: python3.10
-      Description: Lambda function for log management with OpenSearch
       MemorySize: 128
       Timeout: 300
-      Architectures:
-        - x86_64
-      EphemeralStorage:
-        Size: 512
+      Role:
+        Fn::ImportValue: !Sub "${environment}-${product}-lambda-execution-role-arn"
       Environment:
         Variables:
-          INDEX_PATTERN: !Ref indexPattern
-          OPENSEARCH_ENDPOINT: !ImportValue DomainEndpoint
-      VpcConfig:
-        SecurityGroupIds:
-          - !Ref lambdaSecurityGroup
-        SubnetIds:
-          - !ImportValue publicSubnet1
-          - !ImportValue publicSubnet2
-      Role: !GetAtt lambdaRole.Arn
-      Events:
-        Schedule:
-          Type: Schedule
-          Properties:
-            Schedule: cron(30 6 * * ? *)
-            Description: Schedule for Lambda function
-            Enabled: true
+          ENVIRONMENT: !Ref environment
+          PRODUCT: !Ref product
+          S3_BUCKET_NAME: !Sub "${environment}-${product}-backups"
+          SSM_PARAM_SLACK: !Sub "/${environment}/slack/webhook"
+      Tags:
+        environment: !Ref environment
+        product: !Ref product
 
-  lambdaRole:
-    Type: AWS::IAM::Role
+  lambdaInvokePermission:
+    Type: AWS::Lambda::Permission
     Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-      Policies:
-        - PolicyName: !Sub "${environment}-lambda-logs"
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${environment}-lambda:*"
-        - PolicyName: !Sub "${environment}-lambda-network"
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ec2:CreateNetworkInterface
-                  - ec2:DescribeNetworkInterfaces
-                  - ec2:DeleteNetworkInterface
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${environment}-lambda:*"
+      FunctionName: !Ref terminationHandlerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt asgTerminationRule.Arn
+
+  asgTerminationRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${environment}-${product}-asg-termination-rule"
+      Description: "Trigger Lambda when ASG instance enters TERMINATING:Wait state"
+      State: ENABLED
+      EventPattern:
+        source:
+          - "aws.autoscaling"
+        detail-type:
+          - "EC2 Instance-terminate Lifecycle Action"
+        detail:
+          AutoScalingGroupName:
+            - !Sub "${environment}-${product}-asg"
+          LifecycleHookName:
+            - !Sub "${environment}-${product}-termination-hook"
+      Targets:
+        - Id: "TerminationHandlerLambda"
+          Arn: !GetAtt terminationHandlerFunction.Arn
+
+  lambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${environment}-${product}-termination-handler"
+      RetentionInDays: 14
 
 Outputs:
-  lambdaFunctionArn:
-    Description: ARN of the Lambda function
-    Value: !GetAtt lambdaFunction.Arn
+  lambdaFunctionName:
+    Description: Lambda function name
+    Value: !Ref terminationHandlerFunction
+    Export:
+      Name: !Sub "${environment}-${product}-termination-lambda"
 
-  securityGroupId:
-    Description: ID of the Lambda security group
-    Value: !Ref lambdaSecurityGroup
+  lambdaFunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt terminationHandlerFunction.Arn
+    Export:
+      Name: !Sub "${environment}-${product}-termination-lambda-arn"
+
+  eventBridgeRuleArn:
+    Description: EventBridge rule ARN
+    Value: !GetAtt asgTerminationRule.Arn
+    Export:
+      Name: !Sub "${environment}-${product}-termination-rule-arn"

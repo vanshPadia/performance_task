@@ -1,30 +1,77 @@
 include:
+  - local: ".gitlab-ci/templates/awscli.yml"
   - local: ".gitlab-ci/templates/infrastructure.yml"
+  - local: ".gitlab-ci/templates/sam.yml"
   - local: ".gitlab-ci/templates/application.yml"
 
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
 variables:
-  # ROLE_ARN: "arn:aws:iam::AccountId:role/gitlab-ci"
+  # ── PIPELINE CONTROL ────────────────────────────────────────────────────────
   PIPELINE_TYPE:
-    value: "app"
+    value: "infra"
     options:
-      - "app"
       - "infra"
-      - "both"
-    description: "Select which pipeline flow to execute"
+      - "sam"
+      - "app"
+      - "all"
+    description: "What to run: infra=one CFT stack, sam=Lambda, app=build+deploy"
+
+  # vpc → iam → s3 → ecr → securityGroups → grafanaEc2 → loadBalancer → autoScaling → ssmDocument
+  CFT_STACK:
+    value: "vpc"
+    options:
+      - "vpc"
+      - "iam"
+      - "s3"
+      - "ecr"
+      - "securityGroups"
+      - "grafanaEc2"
+      - "loadBalancer"
+      - "autoScaling"
+      - "ssmDocument"
+    description: "Which CFT stack to deploy (only used when PIPELINE_TYPE=infra)"
+
+  # ── COMMON VARIABLES ─────────────────────────────────────────────────────────
+  AWS_DEFAULT_REGION: "ap-south-1"
+  ROLE_ARN: "arn:aws:iam::${AWS_ACCOUNT_ID}:role/gitlab-ci"
+  environment: "dev"
+  product: "impressico"
+
+  # ── CFT PARAMETER VARIABLES (pass what each stack needs) ─────────────────────
+  # keyName        → required for: grafanaEc2, autoScaling
+  # repoUrl        → required for: grafanaEc2, autoScaling
+  # slackWebhookUrl → required for: grafanaEc2
+  # grafanaAdminPassword → required for: grafanaEc2
+  keyName:
+    value: "vpc"
+    description: "keyName "
+  repoUrl:
+    value: "https://git.impressicocrm.com/pip-workspace/vansh-pip-workspace.git"
+  slackWebhookUrl:
+    value: ""
+  grafanaAdminPassword:
+    value: "Admin@1234"
+
+  # ── APP VARIABLES ─────────────────────────────────────────────────────────────
   APPLICATION_CHOICE:
-    value: "frontend"
+    value: "both"
     options:
       - "frontend"
       - "backend"
       - "both"
-    description: "Select which application part to build/deploy (Applies only for 'app' or 'both' pipelines)"
+    description: "Which app service to build/deploy"
 
-workflow:
-  rules:
-    # Only execute if triggered manually via Web UI
-    - if: '$CI_PIPELINE_SOURCE == "web"'
+  ECR_REGISTRY: "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+  IMAGE_TAG: "${CI_COMMIT_SHA}"
+  BACKEND_IMAGE: "${ECR_REGISTRY}/${environment}-${product}-backend"
+  FRONTEND_IMAGE: "${ECR_REGISTRY}/${environment}-${product}-frontend"
+  SSM_DOCUMENT_NAME: "${environment}-${product}-deploy"
 
 stages:
   - infra-deploy
+  - sam-deploy
   - app-build
   - app-deploy

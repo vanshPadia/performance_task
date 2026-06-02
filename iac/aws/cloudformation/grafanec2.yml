@@ -14,7 +14,7 @@ Parameters:
   product:
     Description: Name of the product or part of the project
     Type: String
-    Default: vansh-impressico
+    Default: impressico
 
   service:
     Description: Name of the Service

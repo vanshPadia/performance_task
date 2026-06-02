@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: CloudFormation template to create an Application Load Balancer
+Description: Application Load Balancer pointing to ASG app EC2s
 
 Parameters:
   environment:
@@ -7,99 +7,140 @@ Parameters:
     Type: String
     AllowedValues:
       - dev
+      - stage
+      - prod
     Default: dev
 
-Resources:
-  loadBalancerSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Application Load Balancer
-      VpcId: !ImportValue vpc
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: !Sub ${environment}-alb-securityGroup
+  product:
+    Description: Name of the product or part of the project
+    Type: String
+    Default: impressico
 
+  service:
+    Description: Name of the Service
+    Type: String
+    Default: alb
+
+Resources:
+  # ── APPLICATION LOAD BALANCER ─────────────────────────────────────────────────
   applicationLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: !Sub ${environment}-alb
+      Name: !Sub ${environment}-${product}-alb
       Type: application
       Scheme: internet-facing
       Subnets:
-        - !ImportValue publicSubnet1
-        - !ImportValue publicSubnet2
+        - Fn::ImportValue: !Sub "${environment}-${product}-publicSubnet1"
+        - Fn::ImportValue: !Sub "${environment}-${product}-publicSubnet2"
       SecurityGroups:
-        - !Ref loadBalancerSecurityGroup
+        - Fn::ImportValue: !Sub "${environment}-${product}-alb-sg"
       Tags:
         - Key: Name
-          Value: !Sub ${environment}-alb
+          Value: !Sub ${environment}-${product}-alb
 
-  targetGroup:
+  # ── TARGET GROUP — frontend (port 3000) ───────────────────────────────────────
+  frontendTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: !Sub ${environment}-target-group
+      Name: !Sub ${environment}-${product}-frontend-tg
       Protocol: HTTP
-      Port: 80
+      Port: 3000
       TargetType: instance
-      VpcId: !ImportValue vpc
-      Targets:
-        - Id: !ImportValue
-            "Fn::Sub": "${environment}-instance"
-          Port: 80
+      VpcId:
+        Fn::ImportValue: !Sub "${environment}-${product}-vpc"
       HealthCheckEnabled: true
       HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
       Tags:
         - Key: Name
-          Value: !Sub ${environment}-target-group
+          Value: !Sub ${environment}-${product}-frontend-tg
 
+  # ── TARGET GROUP — backend (port 5000) ────────────────────────────────────────
+  backendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${environment}-${product}-backend-tg
+      Protocol: HTTP
+      Port: 5000
+      TargetType: instance
+      VpcId:
+        Fn::ImportValue: !Sub "${environment}-${product}-vpc"
+      HealthCheckEnabled: true
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /api/books
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub ${environment}-${product}-backend-tg
+
+  # ── LISTENER port 80 ──────────────────────────────────────────────────────────
+  # Default: forward to frontend
+  # /api/* path: forward to backend
   albListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
-      DefaultActions:
-        - Type: forward
-          TargetGroupArn: !Ref targetGroup
       LoadBalancerArn: !Ref applicationLoadBalancer
       Port: 80
       Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref frontendTargetGroup
+
+  # ── LISTENER RULE — /api/* → backend ─────────────────────────────────────────
+  backendListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref albListener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/*
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref backendTargetGroup
 
 Outputs:
-  loadBalancerId:
-    Description: The Load Balancer ID
+  loadBalancerArn:
+    Description: ALB ARN
     Value: !Ref applicationLoadBalancer
     Export:
-      Name: !Sub "${environment}-alb"
+      Name: !Sub "${environment}-${product}-alb"
 
   loadBalancerDNS:
-    Description: The DNS name of the Load Balancer
+    Description: ALB DNS name (use this as your app URL)
     Value: !GetAtt applicationLoadBalancer.DNSName
     Export:
-      Name: !Sub "${environment}-alb-dns"
+      Name: !Sub "${environment}-${product}-alb-dns"
 
+  loadBalancerFullName:
+    Description: ALB full name for CloudWatch metrics
+    Value: !GetAtt applicationLoadBalancer.LoadBalancerFullName
+    Export:
+      Name: !Sub "${environment}-${product}-alb-full-name"
+
+  frontendTargetGroupArn:
+    Description: Frontend target group ARN
+    Value: !Ref frontendTargetGroup
+    Export:
+      Name: !Sub "${environment}-${product}-frontend-tg-arn"
+
+  backendTargetGroupArn:
+    Description: Backend target group ARN
+    Value: !Ref backendTargetGroup
+    Export:
+      Name: !Sub "${environment}-${product}-backend-tg-arn"
+
+  # This is the key export — autoScaling.yml imports this
   targetGroupArn:
-    Description: The ARN of the Target Group
-    Value: !Ref targetGroup
+    Description: Primary target group ARN (frontend) for ASG attachment
+    Value: !Ref frontendTargetGroup
     Export:
-      Name: !Sub "${environment}-target-group-arn"
-
-  loadBalancerSecurityGroupId:
-    Description: The Security Group ID for the Load Balancer
-    Value: !Ref loadBalancerSecurityGroup
-    Export:
-      Name: !Sub "${environment}-alb-securityGroup"
-  LoadBalancerFullName:
-     Value: !GetAtt applicationLoadBalancer.LoadBalancerFullName
-     Export:
-       Name: dev-alb-full-name
-  TargetGroupFullName:
-     Value: !GetAtt targetGroup.TargetGroupFullName
-     Export:
-       Name: dev-tg-full-name
+      Name: !Sub "${environment}-${product}-target-group-arn"

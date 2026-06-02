@@ -6,13 +6,10 @@ services:
     container_name: mysql_db
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: password
-      MYSQL_DATABASE: testdb
-    ports:
-      - "3306:3306"
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-password}
+      MYSQL_DATABASE: ${DB_NAME:-testdb}
     volumes:
       - mysql_data:/var/lib/mysql
-      # 🆕 Mount your local schema folder directly into the container initialization path
       - ./database:/docker-entrypoint-initdb.d
     healthcheck:
       test:
@@ -24,14 +21,14 @@ services:
           "localhost",
           "-u",
           "root",
-          "-ppassword",
+          "-p${DB_PASSWORD:-password}",
         ]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
 
   backend:
-    build: ./backend
+    image: ${ECR_REGISTRY}/${ENVIRONMENT}-${PRODUCT}-backend:${IMAGE_TAG:-latest}
     container_name: node_backend
     restart: always
     ports:
@@ -40,17 +37,20 @@ services:
       - PORT=5000
       - DB_HOST=db
       - DB_USER=root
-      - DB_PASSWORD=password
-      - DB_NAME=testdb
+      - DB_PASSWORD=${DB_PASSWORD:-password}
+      - DB_NAME=${DB_NAME:-testdb}
     depends_on:
       db:
         condition: service_healthy
 
   frontend:
-    build: ./frontend
+    image: ${ECR_REGISTRY}/${ENVIRONMENT}-${PRODUCT}-frontend:${IMAGE_TAG:-latest}
     container_name: react_frontend
+    restart: always
     ports:
       - "3000:3000"
+    environment:
+      - VITE_API_URL=http://${ALB_DNS:-localhost}:5000/api
     depends_on:
       - backend
 

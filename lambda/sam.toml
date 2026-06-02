@@ -1,0 +1,26 @@
+# samconfig.toml
+# SAM configuration file — stores all build and deploy settings
+# With this file: just run `sam build` then `sam deploy` — no flags needed
+# Place this file in the lambda/ directory alongside sam.yml
+
+version = 0.1
+
+[default.global.parameters]
+stack_name    = "dev-impressico-sam-stack"
+region        = "ap-south-1"
+
+[default.build.parameters]
+template_file = "sam.yml"
+build_dir     = ".aws-sam/build"
+use_container = false               # build locally inside the SAM Docker image
+
+[default.deploy.parameters]
+template_file          = ".aws-sam/build/template.yaml"
+stack_name             = "dev-impressico-sam-stack"
+region                 = "ap-south-1"
+s3_bucket              = "dev-impressico-backups"      # reuse backup bucket for SAM artifacts
+s3_prefix              = "sam-artifacts"
+capabilities           = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset      = false
+fail_on_empty_changeset = false
+parameter_overrides    = "environment=dev product=impressico"

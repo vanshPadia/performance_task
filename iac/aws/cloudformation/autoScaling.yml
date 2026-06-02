@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: CloudFormation template to create an Auto Scaling Group with Docker deployment from ECR
+Description: Auto Scaling Group with app EC2s in private subnets - clones repo and runs docker compose on boot
 
 Parameters:
   environment:
@@ -12,7 +12,7 @@ Parameters:
     Default: dev
 
   product:
-    Description: name of the product or part of the project
+    Description: Name of the product or part of the project
     Type: String
     Default: impressico
 
@@ -22,100 +22,140 @@ Parameters:
     Default: autoScaling
 
   keyName:
-    Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
+    Description: Name of an existing EC2 KeyPair
     Type: String
     ConstraintDescription: Must be the name of an existing EC2 KeyPair.
 
-  dockerContainerPort:
-    Description: Port that the Docker container exposes
-    Type: Number
-    Default: 3000
-
-  dockerHostPort:
-    Description: Port on host to map to container port
-    Type: Number
-    Default: 3000
+  repoUrl:
+    Description: Public GitLab repo URL
+    Type: String
+    Default: https://git.impressicocrm.com/pip-workspace/vansh-pip-workspace.git
 
 Mappings:
   envToInstance:
     dev:
       InstanceType: t3.micro
+      ImageId: ami-0388e3ada3d9812da
       MinSize: 1
       MaxSize: 2
       DesiredCapacity: 1
     stage:
       InstanceType: t3.micro
+      ImageId: ami-0388e3ada3d9812da
       MinSize: 1
-      MaxSize: 2
-      DesiredCapacity: 1
+      MaxSize: 3
+      DesiredCapacity: 2
     prod:
-      InstanceType: t3.micro
-      MinSize: 1
-      MaxSize: 2
-      DesiredCapacity: 1
+      InstanceType: t3.small
+      ImageId: ami-0388e3ada3d9812da
+      MinSize: 2
+      MaxSize: 4
+      DesiredCapacity: 2
 
 Resources:
-  autoScalingSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security group for Auto Scaling Group instances
-      VpcId:
-        Fn::ImportValue: !Sub: "${environment}-${product}-vpc"
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: !Ref dockerHostPort
-          ToPort: !Ref dockerHostPort
-          SourceSecurityGroupId:
-            Fn::ImportValue: !Sub "${environment}-alb-securityGroup"
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp:
-            Fn::ImportValue: !Sub "${environment}-${product}-vpcCidir"
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          FromPort: -1
-          ToPort: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: !Sub ${environment}-${product}-asg-securityGroup
-
+  # ── LAUNCH TEMPLATE ───────────────────────────────────────────────────────────
   launchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
       LaunchTemplateName: !Sub ${environment}-${product}-launch-template
       LaunchTemplateData:
-        ImageId: ami-0388e3ada3d9812da
+        ImageId: !FindInMap [envToInstance, !Ref environment, ImageId]
         InstanceType: !FindInMap [envToInstance, !Ref environment, InstanceType]
         KeyName: !Ref keyName
         IamInstanceProfile:
           Arn:
             Fn::ImportValue: !Sub "${environment}-${product}-ec2-instance-profile-arn"
         SecurityGroupIds:
-          - !Ref autoScalingSecurityGroup
+          - Fn::ImportValue: !Sub "${environment}-${product}-app-sg"
         TagSpecifications:
           - ResourceType: instance
             Tags:
               - Key: Name
-                Value: !Sub ${environment}-${product}-asg-instance
+                Value: !Sub ${environment}-${product}-asg-instance # Prometheus discovers by this tag
+              - Key: environment
+                Value: !Ref environment
+              - Key: product
+                Value: !Ref product
         UserData:
           Fn::Base64: !Sub
             - |
               #!/bin/bash
               set -e
+              exec > /var/log/app-setup.log 2>&1
 
-              # Update system and install Docker
-              apt update -y
-              apt install -y docker.io awscli 
+              echo "===== [1/6] System update ====="
+              apt-get update -y
+              apt-get install -y docker.io docker-compose-plugin git curl awscli
 
-              # Start Docker service
               systemctl start docker
               systemctl enable docker
-
-              # Add ec2-user/ubuntu to docker group
               usermod -aG docker ubuntu
 
+              echo "===== [2/6] Install node_exporter (Prometheus scraping) ====="
+              # node_exporter exposes CPU, memory, disk metrics on port 9100
+              # Prometheus on Grafana EC2 scrapes this automatically by tag
+              useradd --no-create-home --shell /bin/false node_exporter || true
+              wget -q https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz -O /tmp/node_exporter.tar.gz
+              tar -xzf /tmp/node_exporter.tar.gz -C /tmp
+              cp /tmp/node_exporter-1.7.0.linux-amd64/node_exporter /usr/local/bin/
+              chown node_exporter:node_exporter /usr/local/bin/node_exporter
+
+              # Create systemd service so node_exporter survives reboots
+              cat > /etc/systemd/system/node_exporter.service << 'EOF'
+              [Unit]
+              Description=Prometheus Node Exporter
+              After=network.target
+
+              [Service]
+              User=node_exporter
+              ExecStart=/usr/local/bin/node_exporter
+              Restart=always
+
+              [Install]
+              WantedBy=multi-user.target
+              EOF
+
+              systemctl daemon-reload
+              systemctl start node_exporter
+              systemctl enable node_exporter
+              echo "node_exporter running on port 9100"
+
+              echo "===== [3/6] Clone repo ====="
+              git clone ${RepoUrl} /opt/app
+              cd /opt/app
+
+              echo "===== [4/6] ECR login and pull images ====="
+              REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+              ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+              ECR_REGISTRY="${!ACCOUNT_ID}.dkr.ecr.${!REGION}.amazonaws.com"
+
+              aws ecr get-login-password --region ${!REGION} | \
+                docker login --username AWS --password-stdin ${!ECR_REGISTRY}
+
+              # Pull latest images — IMAGE_TAG will be updated by SSM deploy command
+              docker pull ${!ECR_REGISTRY}/${Environment}-${Product}-backend:latest || true
+              docker pull ${!ECR_REGISTRY}/${Environment}-${Product}-frontend:latest || true
+
+              echo "===== [5/6] Write docker-compose.yml env vars ====="
+              cat > /opt/app/simple-fullstack-app/.env.prod << EOF
+              ECR_REGISTRY=${!ECR_REGISTRY}
+              ENVIRONMENT=${Environment}
+              PRODUCT=${Product}
+              EOF
+
+              echo "===== [6/6] Start application ====="
+              cd /opt/app/simple-fullstack-app
+              docker compose -f docker-compose.yml up -d
+
+              echo "===== App setup complete ====="
+              PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
+              echo "App running on private IP: ${!PRIVATE_IP}"
+              echo "node_exporter: http://${!PRIVATE_IP}:9100/metrics"
+            - RepoUrl: !Ref repoUrl
+              Environment: !Ref environment
+              Product: !Ref product
+
+  # ── AUTO SCALING GROUP ────────────────────────────────────────────────────────
   autoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
@@ -139,15 +179,17 @@ Resources:
           Value: !Sub ${environment}-${product}-asg
           PropagateAtLaunch: true
 
+  # ── LIFECYCLE HOOK — catches termination, gives Lambda 300s to backup ─────────
   asgTerminationLifecycleHook:
     Type: AWS::AutoScaling::LifecycleHook
     Properties:
       AutoScalingGroupName: !Ref autoScalingGroup
       LifecycleHookName: !Sub ${environment}-${product}-termination-hook
       LifecycleTransition: autoscaling:EC2_INSTANCE_TERMINATING
-      HeartbeatTimeout: 300
-      DefaultResult: CONTINUE
+      HeartbeatTimeout: 300 # Lambda has 5 mins to backup and complete the hook
+      DefaultResult: CONTINUE # if Lambda fails, termination still proceeds
 
+  # ── SCALING POLICIES ──────────────────────────────────────────────────────────
   scaleUpPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
     Properties:
@@ -166,11 +208,12 @@ Resources:
       ScalingAdjustment: -1
       Cooldown: 300
 
+  # ── CLOUDWATCH ALARMS ─────────────────────────────────────────────────────────
   cpuUp70Alarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${environment}-${product}-cpuUp70
-      AlarmDescription: Trigger scale up when CPU > 70%
+      AlarmName: !Sub ${environment}-${product}-cpu-scale-up
+      AlarmDescription: Scale up when CPU > 70%
       MetricName: CPUUtilization
       Namespace: AWS/EC2
       Statistic: Average
@@ -187,13 +230,13 @@ Resources:
   cpuLower30Alarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: !Sub ${environment}-${product}-cpuLower30
-      AlarmDescription: Trigger scale down when CPU <= 30%
+      AlarmName: !Sub ${environment}-${product}-cpu-scale-down
+      AlarmDescription: Scale down when CPU <= 30%
       MetricName: CPUUtilization
       Namespace: AWS/EC2
       Statistic: Average
       Period: 300
-      EvaluationPeriods: 1
+      EvaluationPeriods: 2
       Threshold: 30
       ComparisonOperator: LessThanOrEqualToThreshold
       Dimensions:
@@ -204,19 +247,19 @@ Resources:
 
 Outputs:
   autoScalingGroupName:
-    Description: The Auto Scaling Group Name
+    Description: Auto Scaling Group Name
     Value: !Ref autoScalingGroup
     Export:
       Name: !Sub "${environment}-${product}-asg"
 
-  autoScalingSecurityGroupId:
-    Description: The Security Group ID for the Auto Scaling Group
-    Value: !Ref autoScalingSecurityGroup
-    Export:
-      Name: !Sub "${environment}-${product}-asg-securityGroup"
-
   launchTemplateId:
-    Description: The Launch Template ID
+    Description: Launch Template ID
     Value: !Ref launchTemplate
     Export:
       Name: !Sub "${environment}-${product}-launch-template"
+
+  terminationHookName:
+    Description: Lifecycle hook name for termination events
+    Value: !Sub ${environment}-${product}-termination-hook
+    Export:
+      Name: !Sub "${environment}-${product}-termination-hook"

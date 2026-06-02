@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: SSM Document for deploying containers from ECR (Simplified)
+Description: SSM Command Document for deploying app containers from ECR to ASG EC2s
 
 Parameters:
   environment:
@@ -7,60 +7,100 @@ Parameters:
     Type: String
     AllowedValues:
       - dev
+      - stage
+      - prod
     Default: dev
 
+  product:
+    Description: Name of the product or part of the project
+    Type: String
+    Default: impressico
+
+  service:
+    Description: Name of the Service
+    Type: String
+    Default: ssm
+
 Resources:
-  deployContainerDocument:
+  deployDocument:
     Type: AWS::SSM::Document
     Properties:
+      Name: !Sub ${environment}-${product}-deploy
       DocumentType: Command
-      DocumentFormat: JSON
-      Name: !Sub ${environment}-container-document
+      DocumentFormat: YAML
       Content:
         schemaVersion: "2.2"
-        description: "Deploy container from ECR to EC2 instance"
+        description: "Pull new image from ECR and redeploy app using docker compose"
         parameters:
-          imagename:
+          imageTag:
             type: String
-            description: "ECR repository URL (without tag)"
-          imagetag:
-            type: String
-            description: "Image tag to deploy"
+            description: "Git commit SHA image tag to deploy"
             default: "latest"
+          application:
+            type: String
+            description: "Which service to deploy: frontend, backend, or both"
+            default: "both"
+            allowedValues:
+              - frontend
+              - backend
+              - both
         mainSteps:
           - action: aws:runShellScript
-            name: DeployContainer
+            name: DeployApp
             inputs:
+              timeoutSeconds: "300"
               runCommand:
                 - "#!/bin/bash"
                 - "set -e"
+                - "exec > /var/log/ssm-deploy.log 2>&1"
                 - ""
-                - "ECR_REPO={{ imagename }}"
-                - "TAG={{ imagetag }}"
-                - 'CONTAINER_NAME="backend-container"'
-                - 'FULL_IMAGE="${ECR_REPO}:${TAG}"'
+                - "IMAGE_TAG='{{ imageTag }}'"
+                - "APPLICATION='{{ application }}'"
                 - ""
-                - 'echo "Deploying ${APP_NAME} using image: ${FULL_IMAGE}"'
-                - ""
+                - "echo '===== [1/5] ECR login ====='"
                 - "REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)"
+                - "ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)"
+                - "ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
+                - "aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
                 - ""
-                - "aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${ECR_REPO%%/*}"
+                - "echo '===== [2/5] Pull new image(s) ====='"
+                - 'if [ "${APPLICATION}" = ''backend'' ] || [ "${APPLICATION}" = ''both'' ]; then'
+                - '  echo "Pulling backend:${IMAGE_TAG}"'
+                - "  docker pull ${ECR_REGISTRY}/{{ ssm:/aws/service/global-infrastructure/current-region }}-impressico-backend:${IMAGE_TAG} || \\"
+                - "  docker pull ${ECR_REGISTRY}/dev-impressico-backend:${IMAGE_TAG}"
+                - "fi"
+                - 'if [ "${APPLICATION}" = ''frontend'' ] || [ "${APPLICATION}" = ''both'' ]; then'
+                - '  echo "Pulling frontend:${IMAGE_TAG}"'
+                - "  docker pull ${ECR_REGISTRY}/dev-impressico-frontend:${IMAGE_TAG} || true"
+                - "fi"
                 - ""
-                - "docker pull ${FULL_IMAGE}"
+                - "echo '===== [3/5] Update .env.prod with new IMAGE_TAG ====='"
+                - "cd /opt/app/simple-fullstack-app"
+                - "# Update or write the env file"
+                - "cat > .env.prod << EOF"
+                - "ECR_REGISTRY=${ECR_REGISTRY}"
+                - "ENVIRONMENT=dev"
+                - "PRODUCT=impressico"
+                - "IMAGE_TAG=${IMAGE_TAG}"
+                - "ALB_DNS=$(aws elbv2 describe-load-balancers --query 'LoadBalancers[?contains(LoadBalancerName, `dev-impressico-alb`)].DNSName' --output text --region ${REGION})"
+                - "EOF"
                 - ""
-                - "docker stop ${CONTAINER_NAME} 2>/dev/null || true"
-                - "docker rm ${CONTAINER_NAME} 2>/dev/null || true"
+                - "echo '===== [4/5] Redeploy with new image ====='"
+                - 'if [ "${APPLICATION}" = ''both'' ]; then'
+                - "  docker compose -f docker-compose.yml up -d --no-build"
+                - "else"
+                - "  docker compose -f docker-compose.yml up -d --no-build ${APPLICATION}"
+                - "fi"
                 - ""
-                - "docker run -d --name ${CONTAINER_NAME} -p 80:80 --restart unless-stopped ${FULL_IMAGE}"
-                - ""
+                - "echo '===== [5/5] Verify containers running ====='"
                 - "sleep 5"
-                - "docker ps -f name=${CONTAINER_NAME} || { docker logs ${CONTAINER_NAME}; exit 1; }"
+                - "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
                 - ""
-                - 'echo "Deployment completed successfully"'
+                - "echo 'Deployment complete. Image tag: '${IMAGE_TAG}"
 
 Outputs:
-  documentName:
-    Description: SSM Document Name
-    Value: !Ref deployContainerDocument
+  deployDocumentName:
+    Description: SSM Deploy Document Name
+    Value: !Ref deployDocument
     Export:
-      Name: !Sub ${environment}-container-document
+      Name: !Sub "${environment}-${product}-deploy-document"

@@ -156,8 +156,8 @@ Resources:
         - Fn::ImportValue: !Sub "${environment}-${product}-privateSubnet2"
       TargetGroupARNs:
         - Fn::ImportValue: !Sub "${environment}-${product}-target-group-arn"
-      HealthCheckType: ELB
-      HealthCheckGracePeriod: 300
+      # HealthCheckType: ELB
+      # HealthCheckGracePeriod: 300
       Tags:
         - Key: Name
           Value: !Sub ${environment}-${product}-asg

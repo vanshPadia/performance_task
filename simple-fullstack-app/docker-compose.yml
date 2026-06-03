@@ -52,7 +52,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - VITE_API_URL=http://node_backend:5000/api
+      - VITE_API_URL=http://dev-impressico-alb-1248630855.ap-south-1.elb.amazonaws.com/api
     depends_on:
       - backend
 

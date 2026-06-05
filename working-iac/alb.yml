@@ -1,0 +1,190 @@
+---
+Metadata:
+  AWSToolsMetrics:
+    IaC_Generator: "arn:aws:cloudformation:ap-south-1:313686187887:generatedTemplate/1806749e-7366-4da0-8a0f-0e3aa94b7dd6"
+Resources:
+  ElasticLoadBalancingV2TargetGroupTargetgroupdevimpressicobackendtg6360b8b992d4931c:
+    UpdateReplacePolicy: "Retain"
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    DeletionPolicy: "Retain"
+    Properties:
+      IpAddressType: "ipv4"
+      HealthCheckIntervalSeconds: 200
+      Matcher:
+        HttpCode: "200"
+      HealthCheckPath: "/api/books"
+      Port: 5000
+      Targets:
+        - Port: 5000
+          Id: "i-0fc15a7d0b5fad838"
+      HealthCheckEnabled: true
+      ProtocolVersion: "HTTP1"
+      UnhealthyThresholdCount: 10
+      HealthCheckTimeoutSeconds: 100
+      Name: "dev-impressico-backend-tg"
+      VpcId: "vpc-0ad49abd57a839a4f"
+      HealthyThresholdCount: 2
+      HealthCheckProtocol: "HTTP"
+      TargetGroupAttributes:
+        - Value: "lb_cookie"
+          Key: "stickiness.type"
+        - Value: "20"
+          Key: "deregistration_delay.timeout_seconds"
+        - Value: "86400"
+          Key: "stickiness.app_cookie.duration_seconds"
+        - Value: "1"
+          Key: "target_group_health.dns_failover.minimum_healthy_targets.count"
+        - Value: "use_load_balancer_configuration"
+          Key: "load_balancing.cross_zone.enabled"
+        - Value: "86400"
+          Key: "stickiness.lb_cookie.duration_seconds"
+        - Value: "off"
+          Key: "target_group_health.dns_failover.minimum_healthy_targets.percentage"
+        - Value: "false"
+          Key: "stickiness.enabled"
+        - Value: "off"
+          Key: "target_group_health.unhealthy_state_routing.minimum_healthy_targets.percentage"
+        - Value: "0"
+          Key: "slow_start.duration_seconds"
+        - Value: "1"
+          Key: "target_group_health.unhealthy_state_routing.minimum_healthy_targets.count"
+        - Value: "off"
+          Key: "load_balancing.algorithm.anomaly_mitigation"
+        - Value: ""
+          Key: "stickiness.app_cookie.cookie_name"
+        - Value: "round_robin"
+          Key: "load_balancing.algorithm.type"
+      TargetType: "instance"
+      HealthCheckPort: "traffic-port"
+      Protocol: "HTTP"
+      Tags:
+        - Value: "vansh.padia"
+          Key: "CreatedBy"
+        - Value: "2026-06-03T05:41:33Z"
+          Key: "CreatedAt"
+  ElasticLoadBalancingV2ListenerListenerappdevimpressicoalb8a3e6a2ed4422a6c8a980f969e0e5a4f:
+    UpdateReplacePolicy: "Retain"
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    DeletionPolicy: "Retain"
+    Properties:
+      ListenerAttributes:
+        - Value: "true"
+          Key: "routing.http.response.server.enabled"
+        - Value: ""
+          Key: "routing.http.response.access_control_allow_headers.header_value"
+        - Value: ""
+          Key: "routing.http.response.x_frame_options.header_value"
+        - Value: ""
+          Key: "routing.http.response.access_control_allow_methods.header_value"
+        - Value: ""
+          Key: "routing.http.response.access_control_allow_origin.header_value"
+        - Value: ""
+          Key: "routing.http.response.access_control_allow_credentials.header_value"
+        - Value: ""
+          Key: "routing.http.response.x_content_type_options.header_value"
+        - Value: ""
+          Key: "routing.http.response.content_security_policy.header_value"
+        - Value: ""
+          Key: "routing.http.response.access_control_expose_headers.header_value"
+        - Value: ""
+          Key: "routing.http.response.strict_transport_security.header_value"
+        - Value: ""
+          Key: "routing.http.response.access_control_max_age.header_value"
+      Protocol: "HTTP"
+      LoadBalancerArn: "arn:aws:elasticloadbalancing:ap-south-1:313686187887:loadbalancer/app/dev-impressico-alb/8a3e6a2ed4422a6c"
+      DefaultActions:
+        - Order: 1
+          TargetGroupArn: "arn:aws:elasticloadbalancing:ap-south-1:313686187887:targetgroup/dev-impressico-tg-frontend/e1e7c7ea2c521eef"
+          Type: "forward"
+          ForwardConfig:
+            TargetGroupStickinessConfig:
+              Enabled: false
+              DurationSeconds: 3600
+            TargetGroups:
+              - TargetGroupArn: "arn:aws:elasticloadbalancing:ap-south-1:313686187887:targetgroup/dev-impressico-tg-frontend/e1e7c7ea2c521eef"
+                Weight: 1
+      Port: 80
+  ElasticLoadBalancingV2ListenerRuleListenerruleappdevimpressicoalb8a3e6a2ed4422a6c8a980f969e0e5a4fa8d45ca2fe7d4edf:
+    UpdateReplacePolicy: "Retain"
+    Type: "AWS::ElasticLoadBalancingV2::ListenerRule"
+    DeletionPolicy: "Retain"
+    Properties:
+      Actions:
+        - Order: 1
+          TargetGroupArn: "arn:aws:elasticloadbalancing:ap-south-1:313686187887:targetgroup/dev-impressico-backend-tg/6360b8b992d4931c"
+          Type: "forward"
+          ForwardConfig:
+            TargetGroupStickinessConfig:
+              Enabled: false
+              DurationSeconds: 3600
+            TargetGroups:
+              - TargetGroupArn: "arn:aws:elasticloadbalancing:ap-south-1:313686187887:targetgroup/dev-impressico-backend-tg/6360b8b992d4931c"
+                Weight: 1
+      Priority: 1
+      Conditions:
+        - Values:
+            - "/api/*"
+          Field: "path-pattern"
+          PathPatternConfig:
+            Values:
+              - "/api/*"
+      Transforms: []
+  ElasticLoadBalancingV2TargetGroupTargetgroupdevimpressicotgfrontende1e7c7ea2c521eef:
+    UpdateReplacePolicy: "Retain"
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    DeletionPolicy: "Retain"
+    Properties:
+      IpAddressType: "ipv4"
+      HealthCheckIntervalSeconds: 200
+      Matcher:
+        HttpCode: "200"
+      HealthCheckPath: "/"
+      Port: 3000
+      Targets:
+        - Port: 3000
+          Id: "i-0fc15a7d0b5fad838"
+      HealthCheckEnabled: true
+      ProtocolVersion: "HTTP1"
+      UnhealthyThresholdCount: 10
+      HealthCheckTimeoutSeconds: 100
+      Name: "dev-impressico-tg-frontend"
+      VpcId: "vpc-0ad49abd57a839a4f"
+      HealthyThresholdCount: 2
+      HealthCheckProtocol: "HTTP"
+      TargetGroupAttributes:
+        - Value: "lb_cookie"
+          Key: "stickiness.type"
+        - Value: "20"
+          Key: "deregistration_delay.timeout_seconds"
+        - Value: "86400"
+          Key: "stickiness.app_cookie.duration_seconds"
+        - Value: "1"
+          Key: "target_group_health.dns_failover.minimum_healthy_targets.count"
+        - Value: "use_load_balancer_configuration"
+          Key: "load_balancing.cross_zone.enabled"
+        - Value: "86400"
+          Key: "stickiness.lb_cookie.duration_seconds"
+        - Value: "off"
+          Key: "target_group_health.dns_failover.minimum_healthy_targets.percentage"
+        - Value: "false"
+          Key: "stickiness.enabled"
+        - Value: "off"
+          Key: "target_group_health.unhealthy_state_routing.minimum_healthy_targets.percentage"
+        - Value: "0"
+          Key: "slow_start.duration_seconds"
+        - Value: "1"
+          Key: "target_group_health.unhealthy_state_routing.minimum_healthy_targets.count"
+        - Value: "off"
+          Key: "load_balancing.algorithm.anomaly_mitigation"
+        - Value: ""
+          Key: "stickiness.app_cookie.cookie_name"
+        - Value: "round_robin"
+          Key: "load_balancing.algorithm.type"
+      TargetType: "instance"
+      HealthCheckPort: "traffic-port"
+      Protocol: "HTTP"
+      Tags:
+        - Value: "vansh.padia"
+          Key: "CreatedBy"
+        - Value: "2026-06-03T05:37:50Z"
+          Key: "CreatedAt"

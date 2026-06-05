@@ -1,0 +1,315 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+Description:
+  "Auto Scaling Group with app EC2s in private subnets - clones repo and\
+  \ runs docker compose on boot"
+Parameters:
+  keyName:
+    ConstraintDescription: "Must be the name of an existing EC2 KeyPair."
+    Type: "String"
+    Description: "Name of an existing EC2 KeyPair"
+  repoUrl:
+    Default: "https://git.impressicocrm.com/pip-workspace/vansh-pip-workspace.git"
+    Type: "String"
+    Description: "Public GitLab repo URL"
+  environment:
+    Type: "String"
+    Description: "Environment type"
+    AllowedValues:
+      - "dev"
+      - "stage"
+      - "prod"
+    Default: "dev"
+  product:
+    Default: "impressico"
+    Type: "String"
+    Description: "Name of the product or part of the project"
+  service:
+    Default: "autoScaling"
+    Type: "String"
+    Description: "Name of the Service"
+Mappings:
+  envToInstance:
+    dev:
+      ImageId: "ami-0388e3ada3d9812da"
+      MinSize: 1
+      DesiredCapacity: 1
+      InstanceType: "t3.micro"
+      MaxSize: 1
+    stage:
+      ImageId: "ami-0388e3ada3d9812da"
+      MinSize: 1
+      DesiredCapacity: 2
+      InstanceType: "t3.micro"
+      MaxSize: 2
+    prod:
+      ImageId: "ami-0388e3ada3d9812da"
+      MinSize: 1
+      DesiredCapacity: 2
+      InstanceType: "t3.micro"
+      MaxSize: 2
+Outputs:
+  terminationHookName:
+    Value:
+      Fn::Sub: "${environment}-${product}-termination-hook"
+    Export:
+      Name:
+        Fn::Sub: "${environment}-${product}-termination-hook"
+    Description: "Lifecycle hook name for termination events"
+  launchTemplateId:
+    Value:
+      Ref: "launchTemplate"
+    Export:
+      Name:
+        Fn::Sub: "${environment}-${product}-launch-template"
+    Description: "Launch Template ID"
+  autoScalingGroupName:
+    Value:
+      Ref: "autoScalingGroup"
+    Export:
+      Name:
+        Fn::Sub: "${environment}-${product}-asg"
+    Description: "Auto Scaling Group Name"
+Metadata:
+  AWSToolsMetrics:
+    IaC_Generator: "arn:aws:cloudformation:ap-south-1:313686187887:generatedTemplate/cf02664e-6fd6-498b-84a6-8dbecaa776ee"
+Resources:
+  cpuUp70Alarm:
+    Properties:
+      AlarmActions:
+        - Ref: "scaleUpPolicy"
+      MetricName: "CPUUtilization"
+      ComparisonOperator: "GreaterThanThreshold"
+      AlarmName:
+        Fn::Sub: "${environment}-${product}-cpu-scale-up"
+      AlarmDescription: "Scale up when CPU > 70%"
+      Statistic: "Average"
+      Period: 300
+      Dimensions:
+        - Value:
+            Ref: "autoScalingGroup"
+          Name: "AutoScalingGroupName"
+      EvaluationPeriods: 1
+      Namespace: "AWS/EC2"
+      Threshold: 70
+    Type: "AWS::CloudWatch::Alarm"
+  scaleUpPolicy:
+    Properties:
+      PolicyType: "SimpleScaling"
+      ScalingAdjustment: 1
+      Cooldown: 300
+      AutoScalingGroupName:
+        Ref: "autoScalingGroup"
+      AdjustmentType: "ChangeInCapacity"
+    Type: "AWS::AutoScaling::ScalingPolicy"
+  autoScalingGroup:
+    Properties:
+      MinSize:
+        Fn::FindInMap:
+          - "envToInstance"
+          - Ref: "environment"
+          - "MinSize"
+      TargetGroupARNs:
+        - Fn::ImportValue:
+            Fn::Sub: "${environment}-${product}-target-group-arn"
+      LaunchTemplate:
+        Version:
+          Fn::GetAtt: "launchTemplate.LatestVersionNumber"
+        LaunchTemplateId:
+          Ref: "launchTemplate"
+      AutoScalingGroupName:
+        Fn::Sub: "${environment}-${product}-asg"
+      DesiredCapacity:
+        Fn::FindInMap:
+          - "envToInstance"
+          - Ref: "environment"
+          - "DesiredCapacity"
+      VPCZoneIdentifier:
+        - Fn::ImportValue:
+            Fn::Sub: "${environment}-${product}-privateSubnet1"
+        - Fn::ImportValue:
+            Fn::Sub: "${environment}-${product}-privateSubnet2"
+      MaxSize:
+        Fn::FindInMap:
+          - "envToInstance"
+          - Ref: "environment"
+          - "MaxSize"
+      Tags:
+        - Value:
+            Fn::Sub: "${environment}-${product}-asg"
+          Key: "Name"
+          PropagateAtLaunch: true
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+  asgTerminationLifecycleHook:
+    Properties:
+      LifecycleHookName:
+        Fn::Sub: "${environment}-${product}-termination-hook"
+      HeartbeatTimeout: 300
+      DefaultResult: "CONTINUE"
+      LifecycleTransition: "autoscaling:EC2_INSTANCE_TERMINATING"
+      AutoScalingGroupName:
+        Ref: "autoScalingGroup"
+    Type: "AWS::AutoScaling::LifecycleHook"
+  AutoScalingLifecycleHookASGTerminationBackuphook:
+    UpdateReplacePolicy: "Retain"
+    Type: "AWS::AutoScaling::LifecycleHook"
+    DeletionPolicy: "Retain"
+    Properties:
+      LifecycleHookName: "ASGTerminationBackup-hook"
+      HeartbeatTimeout: 400
+      DefaultResult: "CONTINUE"
+      LifecycleTransition: "autoscaling:EC2_INSTANCE_TERMINATING"
+      AutoScalingGroupName: "asg-dev-impressico"
+  AutoScalingAutoScalingGroupAsgdevimpressico:
+    UpdateReplacePolicy: "Retain"
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    DeletionPolicy: "Retain"
+    Properties:
+      LifecycleHookSpecificationList:
+        - LifecycleHookName: "ASGTerminationBackup-hook"
+          HeartbeatTimeout: 400
+          DefaultResult: "CONTINUE"
+          LifecycleTransition: "autoscaling:EC2_INSTANCE_TERMINATING"
+      LoadBalancerNames: []
+      ServiceLinkedRoleARN: "arn:aws:iam::313686187887:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+      TargetGroupARNs:
+        - "arn:aws:elasticloadbalancing:ap-south-1:313686187887:targetgroup/dev-impressico-backend-tg/6360b8b992d4931c"
+        - "arn:aws:elasticloadbalancing:ap-south-1:313686187887:targetgroup/dev-impressico-tg-frontend/e1e7c7ea2c521eef"
+      AvailabilityZoneIds:
+        - "aps1-az1"
+        - "aps1-az3"
+      Cooldown: "300"
+      DesiredCapacity: "1"
+      HealthCheckGracePeriod: 300
+      InstanceLifecyclePolicy:
+        RetentionTriggers:
+          TerminateHookAbandon: "terminate"
+      NewInstancesProtectedFromScaleIn: false
+      LaunchTemplate:
+        Version: "$Latest"
+        LaunchTemplateName: "dev-impressico-launch-template"
+        LaunchTemplateId: "lt-099883d5be3245bdb"
+      VPCZoneIdentifier:
+        - "subnet-0a477a76aebb44997"
+        - "subnet-08ab607c55629261a"
+      Tags: []
+      CapacityRebalance: false
+      AvailabilityZones:
+        - "ap-south-1b"
+        - "ap-south-1a"
+      AvailabilityZoneDistribution:
+        CapacityDistributionStrategy: "balanced-best-effort"
+      MetricsCollection: []
+      DeletionProtection: "none"
+      MaxSize: "1"
+      MinSize: "1"
+      TerminationPolicies:
+        - "Default"
+      AutoScalingGroupName: "asg-dev-impressico"
+      TrafficSources:
+        - Type: "elbv2"
+          Identifier: "arn:aws:elasticloadbalancing:ap-south-1:313686187887:targetgroup/dev-impressico-tg-frontend/e1e7c7ea2c521eef"
+        - Type: "elbv2"
+          Identifier: "arn:aws:elasticloadbalancing:ap-south-1:313686187887:targetgroup/dev-impressico-backend-tg/6360b8b992d4931c"
+      CapacityReservationSpecification:
+        CapacityReservationPreference: "none"
+      HealthCheckType: "EC2"
+  launchTemplate:
+    Properties:
+      LaunchTemplateName:
+        Fn::Sub: "${environment}-${product}-launch-template"
+      LaunchTemplateData:
+        KeyName:
+          Ref: "keyName"
+        TagSpecifications:
+          - ResourceType: "instance"
+            Tags:
+              - Value:
+                  Fn::Sub: "${environment}-${product}-asg-instance"
+                Key: "Name"
+              - Value:
+                  Ref: "environment"
+                Key: "environment"
+              - Value:
+                  Ref: "product"
+                Key: "product"
+        UserData:
+          Fn::Base64:
+            Fn::Sub:
+              - "#!/bin/bash\nset -e\n\necho \"===== [1/6] System update =====\"\napt\
+                \ update -y\napt install -y docker.io docker-compose curl unzip\n\n\
+                curl \"https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip\" -o\
+                \ \"awscliv2.zip\"\nunzip awscliv2.zip\nsudo ./aws/install\n\nsystemctl\
+                \ start docker\nsystemctl enable docker\nusermod -aG docker ubuntu\n\
+                \necho \"===== [2/6] Install node_exporter (Prometheus scraping) =====\"\
+                \n# node_exporter exposes CPU, memory, disk metrics on port 9100\n#\
+                \ Prometheus on Grafana EC2 scrapes this automatically by tag\nuseradd\
+                \ --no-create-home --shell /bin/false node_exporter || true\nwget -q\
+                \ https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz\
+                \ -O /tmp/node_exporter.tar.gz\ntar -xzf /tmp/node_exporter.tar.gz -C\
+                \ /tmp\ncp /tmp/node_exporter-1.7.0.linux-amd64/node_exporter /usr/local/bin/\n\
+                chown node_exporter:node_exporter /usr/local/bin/node_exporter\n\n#\
+                \ Create systemd service so node_exporter survives reboots\ncat > /etc/systemd/system/node_exporter.service\
+                \ << 'EOF'\n[Unit]\nDescription=Prometheus Node Exporter\nAfter=network.target\n\
+                \n[Service]\nUser=node_exporter\nExecStart=/usr/local/bin/node_exporter\n\
+                Restart=always\n\n[Install]\nWantedBy=multi-user.target\nEOF\n\nsystemctl\
+                \ daemon-reload\nsystemctl start node_exporter\nsystemctl enable node_exporter\n\
+                echo \"node_exporter running on port 9100\"\n\necho \"===== [3/6] Clone\
+                \ repo =====\"\ngit clone ${RepoUrl} /home/ubuntu/application\ncd /home/ubuntu/application/\n\
+                \necho \"===== [6/6] Start application =====\"\ncd /home/ubuntu/application/simple-fullstack-app\n\
+                docker-compose up -d\n\necho \"===== App setup complete =====\"\nPRIVATE_IP=$(curl\
+                \ -s http://169.254.169.254/latest/meta-data/local-ipv4)\necho \"App\
+                \ running on private IP: ${!PRIVATE_IP}\"\necho \"node_exporter: http://${!PRIVATE_IP}:9100/metrics\"\
+                \n"
+              - Environment:
+                  Ref: "environment"
+                Product:
+                  Ref: "product"
+                RepoUrl:
+                  Ref: "repoUrl"
+        ImageId:
+          Fn::FindInMap:
+            - "envToInstance"
+            - Ref: "environment"
+            - "ImageId"
+        IamInstanceProfile:
+          Arn:
+            Fn::ImportValue:
+              Fn::Sub: "${environment}-${product}-ec2-instance-profile-arn"
+        InstanceType:
+          Fn::FindInMap:
+            - "envToInstance"
+            - Ref: "environment"
+            - "InstanceType"
+        SecurityGroupIds:
+          - Fn::ImportValue:
+              Fn::Sub: "${environment}-${product}-app-sg"
+    Type: "AWS::EC2::LaunchTemplate"
+  cpuLower30Alarm:
+    Properties:
+      AlarmActions:
+        - Ref: "scaleDownPolicy"
+      MetricName: "CPUUtilization"
+      ComparisonOperator: "LessThanOrEqualToThreshold"
+      AlarmName:
+        Fn::Sub: "${environment}-${product}-cpu-scale-down"
+      AlarmDescription: "Scale down when CPU <= 30%"
+      Statistic: "Average"
+      Period: 300
+      Dimensions:
+        - Value:
+            Ref: "autoScalingGroup"
+          Name: "AutoScalingGroupName"
+      EvaluationPeriods: 2
+      Namespace: "AWS/EC2"
+      Threshold: 30
+    Type: "AWS::CloudWatch::Alarm"
+  scaleDownPolicy:
+    Properties:
+      PolicyType: "SimpleScaling"
+      ScalingAdjustment: -1
+      Cooldown: 300
+      AutoScalingGroupName:
+        Ref: "autoScalingGroup"
+      AdjustmentType: "ChangeInCapacity"
+    Type: "AWS::AutoScaling::ScalingPolicy"

@@ -94,35 +94,6 @@ Resources:
               systemctl enable docker
               usermod -aG docker ubuntu
 
-              echo "===== [2/6] Install node_exporter (Prometheus scraping) ====="
-              # node_exporter exposes CPU, memory, disk metrics on port 9100
-              # Prometheus on Grafana EC2 scrapes this automatically by tag
-              useradd --no-create-home --shell /bin/false node_exporter || true
-              wget -q https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz -O /tmp/node_exporter.tar.gz
-              tar -xzf /tmp/node_exporter.tar.gz -C /tmp
-              cp /tmp/node_exporter-1.7.0.linux-amd64/node_exporter /usr/local/bin/
-              chown node_exporter:node_exporter /usr/local/bin/node_exporter
-
-              # Create systemd service so node_exporter survives reboots
-              cat > /etc/systemd/system/node_exporter.service << 'EOF'
-              [Unit]
-              Description=Prometheus Node Exporter
-              After=network.target
-
-              [Service]
-              User=node_exporter
-              ExecStart=/usr/local/bin/node_exporter
-              Restart=always
-
-              [Install]
-              WantedBy=multi-user.target
-              EOF
-
-              systemctl daemon-reload
-              systemctl start node_exporter
-              systemctl enable node_exporter
-              echo "node_exporter running on port 9100"
-
               echo "===== [3/6] Clone repo ====="
               git clone ${RepoUrl} /home/ubuntu/application
               cd /home/ubuntu/application/
@@ -131,13 +102,30 @@ Resources:
               cd /home/ubuntu/application/simple-fullstack-app
               docker-compose up -d
 
-              echo "===== App setup complete ====="
-              PRIVATE_IP=$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
-              echo "App running on private IP: ${!PRIVATE_IP}"
-              echo "node_exporter: http://${!PRIVATE_IP}:9100/metrics"
+              wget https://github.com/prometheus/node_exporter/releases/download/v1.8.1/node_exporter-1.8.1.linux-amd64.tar.gz
+              tar xvf node_exporter-1.8.1.linux-amd64.tar.gz
+              sudo mv node_exporter-1.8.1.linux-amd64/node_exporter /usr/local/bin/
+
+              # Create systemd service
+              sudo tee /etc/systemd/system/node_exporter.service <<EOF
+              [Unit]
+              Description=Node Exporter
+              After=network.target
+
+              [Service]
+              User=nobody
+              ExecStart=/usr/local/bin/node_exporter
+              Restart=always
+
+              [Install]
+              WantedBy=multi-user.target
+              EOF
+
+              sudo systemctl daemon-reload
+              sudo systemctl enable node_exporter
+              sudo systemctl start node_exporter
+
             - RepoUrl: !Ref repoUrl
-              Environment: !Ref environment
-              Product: !Ref product
 
   # ── AUTO SCALING GROUP ────────────────────────────────────────────────────────
   autoScalingGroup:

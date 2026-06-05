@@ -1,8 +1,3 @@
-# samconfig.toml
-# SAM configuration file — stores all build and deploy settings
-# With this file: just run `sam build` then `sam deploy` — no flags needed
-# Place this file in the lambda/ directory alongside sam.yml
-
 version = 0.1
 
 [default.global.parameters]
@@ -12,7 +7,7 @@ region        = "ap-south-1"
 [default.build.parameters]
 template_file = "sam.yml"
 build_dir     = ".aws-sam/build"
-use_container = false               # build locally inside the SAM Docker image
+use_container = false             
 
 [default.deploy.parameters]
 template_file          = ".aws-sam/build/template.yaml"

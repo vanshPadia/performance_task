@@ -1,43 +1,59 @@
+---
 schemaVersion: "2.2"
-description: "Deploy container from ECR to EC2 instance"
+description:
+  "Deploy a specific service using docker compose on EC2, then push built\
+  \ image to ECR as backup"
 parameters:
+  ecrRegistry:
+    description: "ECR registry URL e.g. 123456789012.dkr.ecr.ap-south-1.amazonaws.com"
+    type: "String"
+  awsRegion:
+    description: "AWS region e.g. ap-south-1"
+    type: "String"
   application:
-    type: String
-    description: "Name of the application service (frontend, backend, or all)"
-    options:
-      - backend
-      - frontend
-      - both
-  imagename:
-    type: String
-    description: "ECR repository URL (without tag)"
-  imagetag:
-    type: String
-    description: "Image tag to deploy"
-    default: "latest"
+    allowedValues:
+      - "backend"
+      - "frontend"
+    description: "Service to deploy: backend or frontend"
+    type: "String"
+  ecrRepository:
+    description: "ECR repository name for this service e.g. dev-impressico-backend-ecr"
+    type: "String"
+  imageTag:
+    description: "Image tag to use for ECR backup e.g. git commit SHA"
+    type: "String"
 mainSteps:
-  - action: aws:runShellScript
-    name: DeployContainer
-    inputs:
+  - inputs:
+      timeoutSeconds: "600"
       runCommand:
         - "#!/bin/bash"
         - "set -e"
-        - "echo 'Logging into AWS ECR...'"
-        - "REGISTRY_URL=$(echo '{{imagename}}' | cut -d'/' -f1)"
-        - "aws ecr get-login-password --region ${AWS_DEFAULT_REGION:-us-east-1} | docker login --username AWS --password-stdin $REGISTRY_URL"
-        - "echo 'Pulling target image...'"
-        - "docker pull {{imagename}}:{{imagetag}}"
-        - "echo 'Preparing target services...'"
-        - "if [ '{{application}}' = 'both' ]; then"
-        - "  echo 'Deploying all services using docker-compose...'"
-        - "  docker compose down --remove-orphans"
-        - "  docker compose up -d --build"
-        - "else"
-        - "  echo 'Deploying specific service: {{application}}'"
-        - "  docker compose stop {{application}} || true"
-        - "  docker compose rm -f {{application}} || true"
-        - "  docker compose up -d --build {{application}}"
-        - "fi"
-        - "sleep 5"
-        - "docker ps"
-        - "echo 'Deployment completed successfully!'"
+        - "APPLICATION={{ application }}"
+        - "ECR_REGISTRY={{ ecrRegistry }}"
+        - "ECR_REPOSITORY={{ ecrRepository }}"
+        - "IMAGE_TAG={{ imageTag }}"
+        - "AWS_REGION={{ awsRegion }}"
+        - "APP_DIR=/home/ubuntu/application/simple-fullstack-app"
+        - "echo ===== Pull latest code ====="
+        - "cd $APP_DIR"
+        - "git stash"
+        - "git pull"
+        - "echo ===== Stop old container ====="
+        - "docker-compose stop $APPLICATION || true"
+        - "echo ===== Remove old container ====="
+        - "docker-compose rm -f $APPLICATION || true"
+        - "echo ===== Build and start ====="
+        - "docker-compose up -d --build $APPLICATION"
+        - "LOCAL_IMAGE=simple-fullstack-app_${APPLICATION}:latest"
+        - "ECR_IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+        - "echo ===== Login to ECR ====="
+        - "aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY"
+        - "echo ===== Tag image ====="
+        - "docker tag $LOCAL_IMAGE $ECR_IMAGE"
+        - "echo ===== Push image ====="
+        - "docker push $ECR_IMAGE"
+        - "echo Deployment completed successfully"
+        - "echo Local Image : $LOCAL_IMAGE"
+        - "echo ECR Image   : $ECR_IMAGE"
+    name: "deployApplication"
+    action: "aws:runShellScript"

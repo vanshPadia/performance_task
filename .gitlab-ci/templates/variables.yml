@@ -1,0 +1,70 @@
+variables:
+  PIPELINE_TYPE:
+    value: "infra"
+    options:
+      - "infra"
+      - "sam"
+      - "app"
+    description: "Select which pipeline flow to execute"
+
+  environment:
+    value: "dev"
+    options:
+      - dev
+      - stage
+      - prod
+    description: "select environment"
+
+  product:
+    value: "impressico"
+    description: "select the project name"
+
+  CFT_STACK:
+    value: "vpc"
+    options:
+      - vpc
+      - securityGroups
+      - iam
+      - loadBalancer
+      - autoScaling
+      - grafanaEc2
+      - ssmDocument
+      - ecr
+      - s3
+    description: "select the resoure to deploy"
+
+  GRAFANA_ADMIN_PASSWORD:
+    value: "Admin@1234"
+    description: "set password for grafana account"
+
+  keyName:
+    value: "vansh-impressico"
+    description: "key name for ec2"
+
+  imageRetentionCount:
+    value: "5"
+    description: "number of images want to stored for backup"
+
+  INSTANCE_ID:
+    value: "i-0dfa2686269565cfb"
+    description: "enter InstanceID"
+
+  ECR_REGISTRY: "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+
+  IMAGE_TAG: "${CI_COMMIT_SHA}"
+  
+  DOCUMENT_NAME:
+    value: "dev-impressico-ssmDocument-app-deploy"
+    description: "write ssm document name "
+
+  APPLICATION_CHOICE:
+    value: "backend"
+    options:
+      - "backend"
+      - "frontend"
+    description: "Select which application want to deploy"
+
+  ECR_REPOSITORY:
+    value: "dev-impressico-backend"
+    description: "Select which ecr want to use for the backup images"
+

@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "SSM Document for Docker Compose app deployment with ECR backup"
+
+Parameters:
+  environment:
+    Description: Environment type
+    Type: String
+    AllowedValues:
+      - dev
+      - stage
+      - prod
+    Default: dev
+
+  product:
+    Description: Name of the product or part of the project
+    Type: String
+    Default: impressico
+
+  service:
+    Description: Name of the Service
+    Type: String
+    Default: ssmDocument
+
+Resources:
+  AppDeploySSMDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Name: !Sub "${environment}-${product}-${service}-app-deploy"
+      DocumentType: Command
+      DocumentFormat: YAML
+      Content:
+        schemaVersion: "2.2"
+        description: "Deploy a specific service using docker compose on EC2, then push built image to ECR as backup"
+        parameters:
+          application:
+            type: String
+            description: "Service to deploy: backend or frontend"
+            allowedValues:
+              - backend
+              - frontend
+          ecrRegistry:
+            type: String
+            description: "ECR registry URL e.g. 123456789012.dkr.ecr.ap-south-1.amazonaws.com"
+          ecrRepository:
+            type: String
+            description: "ECR repository name for this service e.g. dev-impressico-backend-ecr"
+          imageTag:
+            type: String
+            description: "Image tag to use for ECR backup e.g. git commit SHA"
+          awsRegion:
+            type: String
+            description: "AWS region e.g. ap-south-1"
+        mainSteps:
+          - action: aws:runShellScript
+            name: deployApplication
+            inputs:
+              timeoutSeconds: "600"
+              runCommand:
+                  - "#!/bin/bash"
+                  - "set -e"                  
+                  - "APPLICATION={{ application }}"
+                  - "ECR_REGISTRY={{ ecrRegistry }}"
+                  - "ECR_REPOSITORY={{ ecrRepository }}"
+                  - "IMAGE_TAG={{ imageTag }}"
+                  - "AWS_REGION={{ awsRegion }}"
+                  - "APP_DIR=/home/ubuntu/application/simple-fullstack-app"
+                  - "echo ===== Pull latest code ====="
+                  - "cd $APP_DIR"
+                  - "git stash"
+                  - "git pull"                
+                  - "echo ===== Stop old container ====="
+                  - "docker-compose stop $APPLICATION || true"                  
+                  - "echo ===== Remove old container ====="
+                  - "docker-compose rm -f $APPLICATION || true"                  
+                  - "echo ===== Build and start ====="
+                  - "docker-compose up -d --build $APPLICATION"        
+                  - "LOCAL_IMAGE=simple-fullstack-app_${APPLICATION}:latest"
+                  - "ECR_IMAGE=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+                  - "echo ===== Login to ECR ====="
+                  - "aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY"
+                  - "echo ===== Tag image ====="
+                  - "docker tag $LOCAL_IMAGE $ECR_IMAGE"
+                  - "echo ===== Push image ====="
+                  - "docker push $ECR_IMAGE"
+                  - "echo Deployment completed successfully"
+                  - "echo Local Image : $LOCAL_IMAGE"
+                  - "echo ECR Image   : $ECR_IMAGE"
+
+Outputs:
+  SSMDocumentName:
+    Description: "Name of the SSM Document created"
+    Value: !Ref AppDeploySSMDocument
+    Export:
+      Name: !Sub "${environment}-${product}-${service}-app-deploy"

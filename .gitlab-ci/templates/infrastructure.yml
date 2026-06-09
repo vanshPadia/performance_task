@@ -1,7 +1,3 @@
-variables:
-
-# ROLE_ARN: "arn:aws:iam::AccountId:role/gitlab-ci"
-
 include:
   - local: ".gitlab-ci/templates/awscli.yml"
 
@@ -14,5 +10,4 @@ infra_deploy_job:
   script:
     - ./.gitlab-ci/scripts/infradeploy.sh
   rules:
-    # Run if explicitly requested or if running both
-    - if: '$PIPELINE_TYPE == "infra" || $PIPELINE_TYPE == "both"'
+    - if: '$PIPELINE_TYPE == "infra"'

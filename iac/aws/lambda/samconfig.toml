@@ -1,0 +1,27 @@
+version = 0.1
+
+# ── Global defaults ──────────────────────────────────────────────────────────
+[default.global.parameters]
+stack_name = "dev-impressico-lambda-stack"
+region     = "ap-south-1"
+
+# ── Build configuration ──────────────────────────────────────────────────────
+[default.build.parameters]
+template_file = "template.yml"
+build_dir     = ".aws-sam/build"
+use_container = false
+
+# ── Deploy configuration ─────────────────────────────────────────────────────
+[dev.deploy.parameters]
+template_file           = ".aws-sam/build/template.yaml"   # ← built artifact
+stack_name              = "dev-impressico-lambda-stack"    # ← explicit here, not just global
+region                  = "ap-south-1"
+
+s3_bucket               = "dev-impressico-backups"
+s3_prefix               = "sam-artifacts"
+
+capabilities            = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset       = false
+fail_on_empty_changeset = false
+
+parameter_overrides     = "environment=dev product=impressico service=lambda slackWebhookUrl= DbPassword="

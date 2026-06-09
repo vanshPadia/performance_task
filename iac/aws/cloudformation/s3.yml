@@ -22,31 +22,15 @@ Parameters:
     Default: s3
 
 Resources:
-  # ── BACKUP BUCKET ─────────────────────────────────────────────────────────────
   backupBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "${environment}-${product}-backups"
-      VersioningConfiguration:
-        Status: Enabled # keep versions so accidental deletes are recoverable
-
-      # Auto-clean old backups — no point keeping logs forever
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOldBackups
             Status: Enabled
             ExpirationInDays: 30 # delete backup archives after 30 days
-          - Id: DeleteOldVersions
-            Status: Enabled
-            NoncurrentVersionExpiration:
-              NoncurrentDays: 7 # delete old versions after 7 days
-
-      # Block all public access — backups are private
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
       Tags:
         - Key: Name
           Value: !Sub ${environment}-${product}-backups
@@ -54,25 +38,6 @@ Resources:
           Value: !Ref environment
         - Key: product
           Value: !Ref product
-
-  # ── BUCKET POLICY — only allow access from same account ───────────────────────
-  backupBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref backupBucket
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: DenyNonSSL
-            Effect: Deny
-            Principal: "*"
-            Action: s3:*
-            Resource:
-              - !GetAtt backupBucket.Arn
-              - !Sub "${backupBucket.Arn}/*"
-            Condition:
-              Bool:
-                aws:SecureTransport: false # reject HTTP, allow HTTPS only
 
 Outputs:
   backupBucketName:

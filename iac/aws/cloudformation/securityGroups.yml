@@ -77,7 +77,7 @@ Resources:
           FromPort: 22
           ToPort: 22
           CidrIp:
-            Fn::ImportValue: !Sub "${environment}-${product}-vpcCidir"
+            Fn::ImportValue: !Sub "${environment}-${product}-vpcCidr"
           Description: SSH from within VPC only
         - IpProtocol: tcp
           FromPort: 9100
@@ -111,7 +111,7 @@ Resources:
           FromPort: 9090
           ToPort: 9090
           CidrIp:
-            Fn::ImportValue: !Sub "${environment}-${product}-vpcCidir"
+            Fn::ImportValue: !Sub "${environment}-${product}-vpcCidr"
           Description: Prometheus UI from VPC only
         - IpProtocol: tcp
           FromPort: 22

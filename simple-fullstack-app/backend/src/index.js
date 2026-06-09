@@ -97,5 +97,6 @@ app.post('/api/books/return', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+console.log("Application started at:", new Date().toISOString());
 
 app.listen(PORT, () => console.log(`🚀 API backend listening on port ${PORT}`));

@@ -7,8 +7,8 @@ import urllib.request
 ssm = boto3.client('ssm')
 autoscaling = boto3.client('autoscaling')
 
-S3_BUCKET    = "dev-impressico-backups"
-DB_PASSWORD  = os.environ.get("DB_PASSWORD", "password")
+S3_BUCKET     = os.environ.get("S3_BUCKET", "dev-impressico-backups")
+DB_PASSWORD   = os.environ.get("DB_PASSWORD", "password")
 SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK_URL", "")
 
 def send_slack(message: str, color: str = "#36a64f"):

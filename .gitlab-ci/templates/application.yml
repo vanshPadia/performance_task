@@ -1,26 +1,13 @@
 include:
   - local: ".gitlab-ci/templates/awscli.yml"
 
-variables:
-  ECR_REGISTRY: "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
-  IMAGE_TAG: "${CI_COMMIT_SHA}"
-  DOCUMENT_NAME: "dev-Trecster-backend-deploy"
-  IMAGE_NAME: "${ECR_REGISTRY}/dev-trecster-ecr"
-
-build_app_job:
-  stage: app-build
-  extends: .assume_role
-  script:
-    - ./.gitlab-ci/scripts/dockerBuild.sh
-  rules:
-    - if: '$PIPELINE_TYPE == "app" || $PIPELINE_TYPE == "both"'
-
 deploy_app_job:
   stage: app-deploy
   extends: .assume_role
-  dependencies:
-    - build_app_job
+  image:
+    name: amazon/aws-cli:2.34.18
+    entrypoint: [""]  
   script:
     - ./.gitlab-ci/scripts/ssmDeploy.sh
   rules:
-    - if: '$PIPELINE_TYPE == "app" || $PIPELINE_TYPE == "both"'
+    - if: '$PIPELINE_TYPE == "app"'

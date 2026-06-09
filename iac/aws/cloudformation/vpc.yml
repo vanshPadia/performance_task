@@ -22,7 +22,6 @@ Parameters:
     Default: vpc
 
 Resources:
-  # ── VPC ──────────────────────────────────────────────────────────────────────
   vpc:
     Type: AWS::EC2::VPC
     Properties:
@@ -33,7 +32,6 @@ Resources:
         - Key: Name
           Value: !Sub ${environment}-${product}-${service}
 
-  # ── INTERNET GATEWAY ─────────────────────────────────────────────────────────
   internetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
@@ -47,8 +45,6 @@ Resources:
       VpcId: !Ref vpc
       InternetGatewayId: !Ref internetGateway
 
-  # ── SUBNETS ───────────────────────────────────────────────────────────────────
-  # Public Subnet 1 — AZ-a  (Grafana EC2 + ALB)
   publicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -60,7 +56,6 @@ Resources:
         - Key: Name
           Value: !Sub ${environment}-${product}-publicSubnet1
 
-  # Public Subnet 2 — AZ-b  (ALB second AZ)
   publicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
@@ -72,7 +67,6 @@ Resources:
         - Key: Name
           Value: !Sub ${environment}-${product}-publicSubnet2
 
-  # Private Subnet 1 — AZ-a  (ASG app EC2s)
   privateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
@@ -84,7 +78,6 @@ Resources:
         - Key: Name
           Value: !Sub ${environment}-${product}-privateSubnet1
 
-  # Private Subnet 2 — AZ-b  (ASG app EC2s)
   privateSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
@@ -96,7 +89,6 @@ Resources:
         - Key: Name
           Value: !Sub ${environment}-${product}-privateSubnet2
 
-  # ── NAT GATEWAY (was MISSING — private subnets need this to reach ECR) ────────
   natEip:
     Type: AWS::EC2::EIP
     DependsOn: gatewayAttachment
@@ -110,12 +102,11 @@ Resources:
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId: !GetAtt natEip.AllocationId
-      SubnetId: !Ref publicSubnet1 # NAT lives in public subnet
+      SubnetId: !Ref publicSubnet1 
       Tags:
         - Key: Name
           Value: !Sub ${environment}-${product}-natGateway
 
-  # ── PUBLIC ROUTE TABLE ────────────────────────────────────────────────────────
   publicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -144,7 +135,6 @@ Resources:
       SubnetId: !Ref publicSubnet2
       RouteTableId: !Ref publicRouteTable
 
-  # ── PRIVATE ROUTE TABLE ───────────────────────────────────────────────────────
   privateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -158,7 +148,7 @@ Resources:
     Properties:
       RouteTableId: !Ref privateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref natGateway # NOW correctly references the NAT GW above
+      NatGatewayId: !Ref natGateway 
 
   privateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -183,7 +173,7 @@ Outputs:
     Description: VPC CIDR block
     Value: !GetAtt vpc.CidrBlock
     Export:
-      Name: !Sub "${environment}-${product}-vpcCidir"
+      Name: !Sub "${environment}-${product}-vpcCidr"
 
   publicSubnet1Id:
     Description: Public Subnet 1 ID

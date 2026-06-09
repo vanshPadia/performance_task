@@ -17,7 +17,7 @@ scrape_configs:
         filters:
           - name: tag:Name
             values:
-              - dev-impressico-asg-instance # must match ASG Tag in autoScaling.yml
+              - dev-impressico-asg # must match ASG Tag in autoScaling.yml
           - name: instance-state-name
             values:
               - running

@@ -51,10 +51,10 @@ Resources:
       HealthCheckEnabled: true
       HealthCheckProtocol: HTTP
       HealthCheckPath: /
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
+      HealthCheckIntervalSeconds: 200
+      HealthCheckTimeoutSeconds: 120
       HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
+      UnhealthyThresholdCount: 5
       Tags:
         - Key: Name
           Value: !Sub ${environment}-${product}-frontend-tg
@@ -72,10 +72,10 @@ Resources:
       HealthCheckEnabled: true
       HealthCheckProtocol: HTTP
       HealthCheckPath: /api/books
-      HealthCheckIntervalSeconds: 30
-      HealthCheckTimeoutSeconds: 5
+      HealthCheckIntervalSeconds: 200
+      HealthCheckTimeoutSeconds: 120
       HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 3
+      UnhealthyThresholdCount: 5
       Tags:
         - Key: Name
           Value: !Sub ${environment}-${product}-backend-tg

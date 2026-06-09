@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM template — ASG Termination Backup Lambda + EventBridge rule.
+  Lambda role is pre-created (imported via stack export).
+  Slack webhook passed as CFT parameter at deploy time.
+
+
+Parameters:
+  environment:
+    Description: Deployment environment
+    Type: String
+    AllowedValues: [dev, stage, prod]
+    Default: dev
+
+  product:
+    Description: Product name used in resource naming
+    Type: String
+    Default: impressico
+
+  service:
+    Description: Service name used in resource naming
+    Type: String
+    Default: lambda
+
+  slackWebhookUrl:
+    Description: Slack incoming webhook URL for notifications
+    Type: String
+    NoEcho: true
+  
+  DbPassword:
+    Description: db password for db backup creation 
+    Type: String
+    NoEcho: true          
+
+Globals:
+  Function:
+    Runtime: python3.10
+    MemorySize: 128
+    Timeout: 300
+    Tags:
+      environment: !Ref environment
+      product:     !Ref product
+      service:     !Ref service
+
+Resources:
+  terminationHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${environment}-${product}-${service}-termination-handler"
+      CodeUri: ./python/           
+      Handler: lambda.lambda_handler
+      Role:
+        Fn::ImportValue: !Sub "${environment}-${product}-lambda-execution-role-arn"
+      Environment:
+        Variables:
+          DB_PASSWORD:      !Ref DbPassword
+          S3_BUCKET:        !Sub "${environment}-${product}-backups"
+          SLACK_WEBHOOK_URL: !Ref slackWebhookUrl   
+
+  asgTerminationRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${environment}-${product}-${service}-termination-rule"
+      Description: "Triggers Lambda when an ASG instance enters TERMINATING:Wait"
+      State: ENABLED
+      EventPattern:
+        source:
+          - "aws.autoscaling"
+        detail-type:
+          - "EC2 Instance-terminate Lifecycle Action"
+        detail:
+          AutoScalingGroupName:
+            - !Sub "${environment}-${product}-asg"
+          LifecycleHookName:
+            - !Sub "${environment}-${product}-termination-hook"
+      Targets:
+        - Id: "TerminationHandlerLambdaTarget"
+          Arn: !GetAtt terminationHandlerFunction.Arn
+
+  lambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref terminationHandlerFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt asgTerminationRule.Arn
+
+Outputs:
+  lambdaFunctionName:
+    Description: Lambda function name
+    Value: !Ref terminationHandlerFunction
+    Export:
+      Name: !Sub "${environment}-${product}-${service}-termination-lambda-name"
+
+  lambdaFunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt terminationHandlerFunction.Arn
+    Export:
+      Name: !Sub "${environment}-${product}-${service}-termination-lambda-arn"
+
+  eventBridgeRuleArn:
+    Description: EventBridge rule ARN
+    Value: !GetAtt asgTerminationRule.Arn
+    Export:
+      Name: !Sub "${environment}-${product}-${service}-termination-rule-arn"

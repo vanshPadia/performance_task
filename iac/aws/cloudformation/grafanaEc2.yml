@@ -19,7 +19,7 @@ Parameters:
   service:
     Description: Name of the Service
     Type: String
-    Default: grafana
+    Default: grafanaEc2
 
   keyName:
     Description: Name of an existing EC2 KeyPair for SSH access
@@ -29,10 +29,19 @@ Parameters:
   repoUrl:
     Description: Public GitLab repo URL
     Type: String
-    Default: https://git.impressicocrm.com/pip-workspace/vansh-pip-workspace.git
+    Default: git.impressicocrm.com/pip-workspace/vansh-pip-workspace.git
 
   slackWebhookUrl:
     Description: Slack webhook URL for Grafana alerts
+    Type: String
+    NoEcho: true
+
+  gitlabUsername:
+    Description: GitLab username for repo access
+    Type: String
+
+  gitlabToken:
+    Description: GitLab personal access token or CI token
     Type: String
     NoEcho: true
 
@@ -85,8 +94,13 @@ Resources:
             usermod -aG docker ubuntu
 
             echo "===== Cloning repo ====="
-            git clone ${RepoUrl} /home/ubuntu/grafana/
+            git clone --branch devops --single-branch https://${GitUser}:${GitToken}@${RepoUrl} /home/ubuntu/grafana              
             cd /home/ubuntu/grafana/monitering/
+
+            echo "===== Downloading dashboard 1860 ====="
+            mkdir -p /home/ubuntu/grafana/monitering/grafana-config/dashboards
+            curl -o /home/ubuntu/grafana/monitering/grafana-config/dashboards/node-exporter-1860.json \
+              https://grafana.com/api/dashboards/1860/revisions/latest/download
 
             echo "===== Writing .env for Grafana ====="
             cat > /home/ubuntu/grafana/monitering/docker/.env << EOF
@@ -96,15 +110,13 @@ Resources:
 
             echo "===== Starting Grafana + Prometheus ====="
             cd /home/ubuntu/grafana/monitering/docker
-            docker compose up -d
+            docker-compose up -d
 
-            echo "===== Done ====="
-            PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
-            echo "Grafana:    http://${!PUBLIC_IP}:3000"
-            echo "Prometheus: http://${!PUBLIC_IP}:9090"
           - RepoUrl: !Ref repoUrl
             GrafanaPassword: !Ref grafanaAdminPassword
             SlackUrl: !Ref slackWebhookUrl
+            GitUser: !Ref gitlabUsername   
+            GitToken: !Ref gitlabToken    
 
 Outputs:
   grafanaInstanceId:

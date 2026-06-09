@@ -22,9 +22,6 @@ Parameters:
     Default: iam
 
 Resources:
-  # ═══════════════════════════════════════════════════════════════════════════
-  # EC2 INSTANCE ROLE  (used by ASG app instances + Grafana EC2)
-  # ═══════════════════════════════════════════════════════════════════════════
   ec2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -54,19 +51,6 @@ Resources:
                   - ecr:DescribeRepositories
                   - ecr:ListImages
                 Resource: "*"
-
-        # Read secrets/config from SSM Parameter Store
-        - PolicyName: SSMParameterAccess
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                  - ssm:GetParametersByPath
-                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${environment}/*"
-
         # Write logs/backups to S3 (used by Lambda SSM backup command on EC2)
         - PolicyName: S3BackupAccess
           PolicyDocument:
@@ -115,10 +99,6 @@ Resources:
       InstanceProfileName: !Sub ${environment}-${product}-ec2-instance-profile
       Roles:
         - !Ref ec2InstanceRole
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # LAMBDA EXECUTION ROLE  (termination handler)
-  # ═══════════════════════════════════════════════════════════════════════════
   lambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -155,17 +135,6 @@ Resources:
                   - autoscaling:CompleteLifecycleAction
                   - autoscaling:DescribeAutoScalingInstances
                 Resource: "*"
-
-        # Read Slack webhook URL from SSM Parameter Store
-        - PolicyName: LambdaSSMParameterAccess
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssm:GetParameter
-                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${environment}/slack/webhook"
-
         # Write backup archive to S3
         - PolicyName: LambdaS3BackupAccess
           PolicyDocument:

@@ -1,0 +1,15 @@
+include:
+  - local: ".gitlab-ci/templates/awscli.yml"
+
+sam_deploy_job:
+  stage: sam-deploy
+  extends: .assume_role
+  image:
+    name: public.ecr.aws/sam/build-python3.10:latest
+    entrypoint: [""]
+  script:
+    - cd iac/aws/lambda
+    - sam build
+    - sam deploy --config-env "$environment" --parameter-overrides "slackWebhookUrl='$SLACK_WEBHOOK_URL' DbPassword='$DB_PASSWORD'"
+  rules:
+    - if: '$PIPELINE_TYPE == "sam"'
